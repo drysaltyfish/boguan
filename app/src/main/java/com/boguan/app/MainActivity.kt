@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.boguan.app.settings.SettingsScreen
 import com.boguan.model.Segment
 import com.boguan.model.Session
 import com.boguan.model.SessionState
@@ -58,16 +59,23 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun RootScreen(vm: MainViewModel = viewModel()) {
+    var showSettings by remember { mutableStateOf(false) }
     val opened = vm.openedSession
-    if (opened != null) {
-        HistoryDetailScreen(vm, opened)
-    } else {
-        LiveScreen(vm)
+    when {
+        showSettings -> SettingsScreen(
+            initialBaseUrl = vm.baseUrl,
+            initialApiKey = vm.apiKey,
+            initialModel = vm.model,
+            onSave = { b, k, m -> vm.saveSettings(b, k, m) },
+            onBack = { showSettings = false },
+        )
+        opened != null -> HistoryDetailScreen(vm, opened)
+        else -> LiveScreen(vm, onOpenSettings = { showSettings = true })
     }
 }
 
 @Composable
-private fun LiveScreen(vm: MainViewModel = viewModel()) {
+private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Unit = {}) {
     val context = LocalContext.current
     var hasPermission by remember {
         mutableStateOf(
@@ -94,7 +102,10 @@ private fun LiveScreen(vm: MainViewModel = viewModel()) {
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("博观约取", style = MaterialTheme.typography.headlineSmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("博观约取", style = MaterialTheme.typography.headlineSmall)
+                    TextButton(onClick = onOpenSettings) { Text("设置") }
+                }
                 Text(vm.engineDescription, style = MaterialTheme.typography.bodySmall)
                 Text(vm.statusMessage, style = MaterialTheme.typography.bodySmall)
             }
@@ -126,6 +137,24 @@ private fun LiveScreen(vm: MainViewModel = viewModel()) {
                 Column(Modifier.padding(12.dp)) {
                     Text("实时", style = MaterialTheme.typography.labelMedium)
                     Text(vm.partialText.ifEmpty { "—" }, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("实时摘要", style = MaterialTheme.typography.labelMedium)
+                    if (vm.summaryTitle.isNotBlank()) {
+                        Text(vm.summaryTitle, style = MaterialTheme.typography.titleSmall)
+                    }
+                    if (vm.summaryBullets.isEmpty()) {
+                        Text("—", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        vm.summaryBullets.forEach { b -> Text("· " + b, style = MaterialTheme.typography.bodyMedium) }
+                    }
+                    if (vm.summaryStatus.isNotBlank()) {
+                        Text(vm.summaryStatus, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }

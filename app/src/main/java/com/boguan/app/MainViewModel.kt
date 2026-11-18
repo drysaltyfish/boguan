@@ -12,6 +12,7 @@ import com.boguan.model.Session
 import com.boguan.model.SessionState
 import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
+import com.boguan.app.settings.AppSettings
 import com.boguan.store.SessionRepository
 import java.io.File
 
@@ -25,6 +26,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val controller = RecordingController
     private val player = SegmentPlayer()
     private val historyRepository = SessionRepository(BoguanDatabase(app))
+    private val settings = AppSettings(app)
 
     init {
         controller.ensureInit(app)
@@ -52,6 +54,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     val playingSegmentId: Long? get() = player.playingSegmentId
+
+    // ---- 设置 ----
+    val baseUrl: String get() = settings.baseUrl
+    val apiKey: String get() = settings.apiKey
+    val model: String get() = settings.model
+
+    fun saveSettings(baseUrl: String, apiKey: String, model: String) = settings.save(baseUrl, apiKey, model)
+
+    // ---- 摘要状态 ----
+    val summaryTitle: String get() = controller.summaryTitle
+    val summaryBullets: List<String> get() = controller.summaryBullets
+    val summaryStatus: String get() = controller.summaryStatus
 
     fun setType(type: SessionType) = controller.setType(type)
     fun preload() = controller.preload()

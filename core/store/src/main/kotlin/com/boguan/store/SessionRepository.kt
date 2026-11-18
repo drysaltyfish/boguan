@@ -78,6 +78,48 @@ class SessionRepository(private val db: BoguanDatabase) {
         put("audio_path", audioPath)
     }
 
+    fun insertMicroSummary(summary: com.boguan.model.MicroSummary) {
+        val values = ContentValues().apply {
+            put("session_id", summary.sessionId)
+            put("kind", summary.kind.name)
+            put("start_ms", summary.startMs)
+            put("end_ms", summary.endMs)
+            put("payload_json", summary.payloadJson)
+            put("degraded", if (summary.degraded) 1 else 0)
+        }
+        db.writableDatabase.insert("micro_summary", null, values)
+        db.writableDatabase.execSQL(
+            "DELETE FROM micro_summary WHERE session_id = ? AND id NOT IN " +
+                "(SELECT id FROM micro_summary WHERE session_id = ? ORDER BY end_ms DESC LIMIT 50)",
+            arrayOf(summary.sessionId, summary.sessionId),
+        )
+    }
+
+    fun microSummariesOf(sessionId: String): List<com.boguan.model.MicroSummary> {
+        val out = mutableListOf<com.boguan.model.MicroSummary>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, session_id, kind, start_ms, end_ms, payload_json, degraded " +
+                "FROM micro_summary WHERE session_id = ? ORDER BY end_ms",
+            arrayOf(sessionId),
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.boguan.model.MicroSummary(
+                        id = c.getLong(0),
+                        sessionId = c.getString(1),
+                        kind = runCatching { com.boguan.model.MicroSummary.Kind.valueOf(c.getString(2)) }
+                            .getOrDefault(com.boguan.model.MicroSummary.Kind.MICRO),
+                        startMs = c.getLong(3),
+                        endMs = c.getLong(4),
+                        payloadJson = c.getString(5),
+                        degraded = c.getInt(6) == 1,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
     /** 历史场次（新的在前）。 */
     fun listSessions(limit: Int = 100): List<Session> {
         val out = mutableListOf<Session>()

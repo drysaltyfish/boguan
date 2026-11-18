@@ -18,6 +18,23 @@ import com.boguan.model.SessionState
 import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
 import com.boguan.store.SessionRepository
+import com.boguan.app.settings.AppSettings
+import com.boguan.summarize.LlmEndpoint
+import com.boguan.summarize.MicroSummaryService
+import com.boguan.summarize.OpenAiCompatibleClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -30,9 +47,13 @@ import java.util.concurrent.Executors
 object RecordingController {
 
     private const val TAG = "RecordingController"
+    private const val MIN_SUMMARY_CHARS = 60
 
     private val main = Handler(Looper.getMainLooper())
     private val engineLoader = Executors.newSingleThreadExecutor { r -> Thread(r, "boguan-engine") }
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val microSummarizer = MicroSummaryService(OpenAiCompatibleClient())
 
     private var appContext: Context? = null
     private var repository: SessionRepository? = null
@@ -44,6 +65,11 @@ object RecordingController {
     private var session: Session? = null
     private var segmentStartMs = 0L
     private var samplesSinceSegmentStart = 0L
+    private var appSettings: AppSettings? = null
+    private var summaryJob: Job? = null
+    private var pendingSummaryText = StringBuilder()
+    private var previousSummary = ""
+    private var summaryWindowStartMs = 0L
     private var totalSamplesWritten = 0L
 
     // ---- UI 可观察状态 ----
@@ -63,6 +89,12 @@ object RecordingController {
         private set
     var startedAtWallMs by mutableStateOf(0L)
         private set
+    var summaryTitle by mutableStateOf("")
+        private set
+    var summaryBullets by mutableStateOf<List<String>>(emptyList())
+        private set
+    var summaryStatus by mutableStateOf("")
+        private set
 
     val segments = mutableStateListOf<Segment>()
 
@@ -75,6 +107,7 @@ object RecordingController {
         appContext = app
         repository = SessionRepository(BoguanDatabase(app))
         audioStore = SessionAudioStore(File(app.filesDir, "sessions"))
+        appSettings = AppSettings(app)
     }
 
     fun setType(type: SessionType) {
@@ -121,6 +154,12 @@ object RecordingController {
             totalSamplesWritten = 0L
             recordedBytes = 0L
             startedAtWallMs = System.currentTimeMillis()
+            pendingSummaryText = StringBuilder()
+            previousSummary = ""
+            summaryWindowStartMs = 0L
+            summaryTitle = ""
+            summaryBullets = emptyList()
+            summaryStatus = if (appSettings?.endpointOrNull() == null) "未配置 API key：摘要不会生成" else ""
             writer = runCatching { audioStore.openWriter(newSession.id) }
                 .onFailure { Log.e(TAG, "open wav writer failed", it) }
                 .getOrNull()
@@ -138,10 +177,12 @@ object RecordingController {
         state = SessionState.RECORDING
         session?.let { repository.updateState(it.id, SessionState.RECORDING) }
         statusMessage = "正在记录"
+        startSummaryLoop()
     }
 
     fun pause() {
         if (state != SessionState.RECORDING) return
+        flushSummary("暂停")
         state = SessionState.PAUSED
         session?.let { repository?.updateState(it.id, SessionState.PAUSED) }
         statusMessage = "已暂停"
@@ -150,6 +191,9 @@ object RecordingController {
     /** 结束记录：停采集、封 WAV、写终态。可在服务销毁时安全调用。 */
     fun stop() {
         if (state != SessionState.RECORDING && state != SessionState.PAUSED) return
+        summaryJob?.cancel()
+        summaryJob = null
+        flushSummary("结束")
         val repository = repository
         val current = session
         state = SessionState.FINALIZING
@@ -168,7 +212,94 @@ object RecordingController {
         }, 0)
     }
 
+    // ---------------- 摘要调度（ADR-0003） ----------------
+
+    private fun startSummaryLoop() {
+        summaryJob?.cancel()
+        val interval = appSettings?.summaryIntervalMs ?: AppSettings.DEFAULT_INTERVAL_MS
+        summaryJob = ioScope.launch {
+            while (isActive) {
+                delay(interval)
+                main.post { flushSummary("定时") }
+            }
+        }
+    }
+
+    /** 把窗口内累积的转写送给 LLM；失败时把文本退回缓冲，下一轮重试。 */
+    private fun flushSummary(reason: String) {
+        val sessionId = session?.id ?: return
+        if (state == SessionState.FINALIZING && reason == "结束") {
+            // 结束时的最后一次 flush 允许
+        } else if (state != SessionState.RECORDING && state != SessionState.PAUSED && reason != "结束") {
+            return
+        }
+        val text = pendingSummaryText.toString().trim()
+        if (text.length < MIN_SUMMARY_CHARS) return
+
+        val endpoint = appSettings?.endpointOrNull()
+        if (endpoint == null) {
+            summaryStatus = "未配置 API key：摘要已跳过"
+            return
+        }
+        pendingSummaryText = StringBuilder()
+        val startMs = summaryWindowStartMs
+        val endMs = segmentStartMs
+        summaryStatus = "摘要生成中（" + reason + "）…"
+
+        ioScope.launch {
+            try {
+                val response = microSummarizer.summarize(
+                    endpoint = endpoint,
+                    type = sessionType,
+                    previousSummary = previousSummary,
+                    windowText = text,
+                )
+                val bullets = parseStringList(response.content, "bullets")
+                val title = parseString(response.content, "title")
+                main.post {
+                    previousSummary = bullets.joinToString("；").ifBlank { previousSummary }
+                    summaryTitle = title
+                    summaryBullets = bullets
+                    summaryStatus = "摘要已更新至 " + fmtMs(endMs)
+                    summaryWindowStartMs = endMs
+                    repository?.insertMicroSummary(
+                        com.boguan.model.MicroSummary(
+                            sessionId = sessionId,
+                            kind = com.boguan.model.MicroSummary.Kind.MICRO,
+                            startMs = startMs,
+                            endMs = endMs,
+                            payloadJson = response.content,
+                        ),
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "summary failed", t)
+                main.post {
+                    summaryStatus = "摘要失败：" + (t.message ?: t.javaClass.simpleName)
+                    // 退回缓冲，下一轮重试
+                    pendingSummaryText.insert(0, text + "\n")
+                }
+            }
+        }
+    }
+
+    private fun parseStringList(jsonText: String, key: String): List<String> = runCatching {
+        val obj = json.parseToJsonElement(jsonText).jsonObject
+        (obj[key] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+    }.getOrDefault(emptyList())
+
+    private fun parseString(jsonText: String, key: String): String = runCatching {
+        json.parseToJsonElement(jsonText).jsonObject[key]?.jsonPrimitive?.contentOrNull.orEmpty()
+    }.getOrDefault("")
+
+    private fun fmtMs(ms: Long): String {
+        val s = ms / 1000
+        return String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+    }
+
     fun release() {
+        summaryJob?.cancel()
+        summaryJob = null
         source?.stop()
         source = null
         writer?.close()
@@ -210,6 +341,7 @@ object RecordingController {
         )
         segmentStartMs = endMs
         samplesSinceSegmentStart = 0L
+        pendingSummaryText.append(text).append('\n')
         repository.insertSegment(segment)
         repository.segmentsOf(sessionId).lastOrNull()?.let { segments.add(it) }
     }
