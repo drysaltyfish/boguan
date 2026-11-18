@@ -1,2 +1,17 @@
-# 一次性技术尖峰（用完即弃，不入库）
+# 一次性技术尖峰（用完即弃）
 .spike/
+
+# Gradle / Android
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 系统
+.DS_Store
+Thumbs.db

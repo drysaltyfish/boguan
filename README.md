@@ -60,7 +60,22 @@
 | [ADR-0006](docs/adr/0006-release-and-licensing.md) | 发布、许可与供应链 |
 | [ADR-0007](docs/adr/0007-v0.1-scope-and-acceptance.md) | v0.1 范围、验收门槛、风险登记 |
 | [ADR-0008](docs/adr/0008-realtime-model-revision.md) | 实时模型改版：X-ASR 480ms、Apache-2.0、真机实测 |
+| [ADR-0009](docs/adr/0009-storage-implementation.md) | 存储实现：首版 SQLiteOpenHelper，Room 作迁移目标 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
+
+## 工程结构
+
+```
+app/                 Compose 薄壳：界面、权限、录音调度
+core/model/          纯 Kotlin 领域模型（Session / Segment / ReportPayload / 状态机）
+core/audio/          麦克风采集（16 kHz 单声道 PCM，100 ms 帧）
+core/asr/            ASR 边界 + sherpa-onnx 流式实现（AAR 自托管于 libs/）
+core/summarize/      LLM 边界与数据结构（OpenAI 兼容协议，模型名不硬编码）
+core/store/          本地 SQLite（六表）+ SessionRepository
+core/report/         Markdown 渲染器（课堂 / 会议两种模板投影）
+```
+
+模块边界与依赖方向见 [ADR-0001](docs/adr/0001-application-architecture.md)；存储实现选择见 [ADR-0009](docs/adr/0009-storage-implementation.md)。
 
 ## 数据流向
 
