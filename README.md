@@ -61,6 +61,7 @@
 | [ADR-0007](docs/adr/0007-v0.1-scope-and-acceptance.md) | v0.1 范围、验收门槛、风险登记 |
 | [ADR-0008](docs/adr/0008-realtime-model-revision.md) | 实时模型改版：X-ASR 480ms、Apache-2.0、真机实测 |
 | [ADR-0009](docs/adr/0009-storage-implementation.md) | 存储实现：首版 SQLiteOpenHelper，Room 作迁移目标 |
+| [ADR-0010](docs/adr/0010-two-pass-text-policy.md) | 二遍稿文本策略：两稿并存不覆盖，以分歧驱动待确认 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 工程结构

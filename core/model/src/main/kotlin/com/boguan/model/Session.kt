@@ -32,7 +32,12 @@ data class Session(
     var audioPath: String? = null,
 )
 
-/** 转写段。isFinal=false 为实时稿，true 为终稿。 */
+/**
+ * 转写段。
+ *
+ * [text] 是实时稿（v0.1 的展示文本），[offlineText] 是会后二遍的离线稿。
+ * 两份都保留：二遍稿不一定更好，分歧本身是「待确认」的信号（ADR-0010）。
+ */
 data class Segment(
     val id: Long = 0,
     val sessionId: String,
@@ -41,7 +46,18 @@ data class Segment(
     val text: String,
     val confidence: Float = 0f,
     val isFinal: Boolean = false,
-)
+    val offlineText: String = "",
+) {
+    /** 展示用文本，由 [TranscriptMerge.displayText] 单点决定。 */
+    val displayText: String get() = TranscriptMerge.displayText(text, offlineText)
+
+    /** 实时稿与二遍稿的相似度（0..1，越低越可疑）；没有二遍稿时为 1。 */
+    val offlineSimilarity: Double
+        get() = if (offlineText.isBlank()) 1.0 else TranscriptMerge.similarity(text, offlineText)
+
+    /** 实时稿与二遍稿分歧较大，建议回听确认。 */
+    val needsReview: Boolean get() = TranscriptMerge.needsReview(text, offlineText)
+}
 
 /** 每 2 分钟的微摘要 / 每 10 分钟的结构整理。 */
 data class MicroSummary(

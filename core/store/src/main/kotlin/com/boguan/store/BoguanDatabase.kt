@@ -38,6 +38,7 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
                 text TEXT NOT NULL,
                 confidence REAL NOT NULL DEFAULT 0,
                 is_final INTEGER NOT NULL DEFAULT 0,
+                offline_text TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE
             )
             """.trimIndent(),
@@ -107,10 +108,14 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE session ADD COLUMN audio_path TEXT")
         }
+        if (oldVersion < 3) {
+            // 二遍稿独立存储，不再覆盖实时稿（ADR-0010）
+            db.execSQL("ALTER TABLE segment ADD COLUMN offline_text TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     companion object {
         const val DB_NAME = "boguan.db"
-        const val DB_VERSION = 2
+        const val DB_VERSION = 3
     }
 }

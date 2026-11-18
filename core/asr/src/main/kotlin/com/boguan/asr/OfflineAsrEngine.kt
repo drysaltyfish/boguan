@@ -3,14 +3,19 @@ package com.boguan.asr
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import java.io.File
+import java.util.Locale
 
 /**
- * 离线（非流式）ASR，用于会后的「终稿二遍」（ADR-0002 / ADR-0008）。
- * 模型：SenseVoice-Small int8。
+ * 离线（非流式）ASR，用于会后的「终稿二遍」（ADR-0002 / ADR-0008 / ADR-0010）。
+ *
+ * 支持两种模型目录（按目录名识别，模型文件需为 model.int8.onnx 或 model.onnx + tokens.txt）：
+ *  - 名称含 paraformer：Paraformer 中文模型（v0.1 默认，真机实测更稳）
+ *  - 名称含 sense-voice：SenseVoice-Small（保留作为备选/对照）
  *
  * 调用方按实时段的起止时间切好音频再送进来，因此这里不需要再做 VAD 分段。
  */
@@ -19,7 +24,7 @@ class OfflineAsrEngine private constructor(
     val description: String,
 ) {
 
-    /** 一次最多解码 20 秒，超过由调用方切分（SenseVoice 的最佳输入窗口）。 */
+    /** 一次最多解码 20 秒，超过由调用方切分。 */
     fun transcribe(samples: FloatArray): String {
         if (samples.isEmpty()) return ""
         val stream = recognizer.createStream()
@@ -34,6 +39,8 @@ class OfflineAsrEngine private constructor(
 
     fun release() = runCatching { recognizer.release() }
 
+    private enum class Family { PARAFORMER, SENSE_VOICE }
+
     companion object {
         private const val TAG = "OfflineAsrEngine"
         private const val SAMPLE_RATE = 16_000
@@ -41,17 +48,19 @@ class OfflineAsrEngine private constructor(
 
         fun create(modelsRoot: File): OfflineAsrEngine? {
             if (!modelsRoot.isDirectory) return null
-            val dir = modelsRoot.listFiles()
-                ?.filter { it.isDirectory }
-                ?.firstOrNull {
-                    (File(it, "model.int8.onnx").exists() || File(it, "model.onnx").exists()) &&
-                        File(it, "tokens.txt").exists()
-                }
-            if (dir == null) {
+            val candidates = modelsRoot.listFiles()
+                ?.filter { it.isDirectory && modelFileOf(it) != null }
+                .orEmpty()
+            if (candidates.isEmpty()) {
                 Log.w(TAG, "no offline model under " + modelsRoot.absolutePath)
                 return null
             }
-            val modelName = if (File(dir, "model.int8.onnx").exists()) "model.int8.onnx" else "model.onnx"
+            // 优先 Paraformer（ADR-0010 的实测结论），其次 SenseVoice
+            val preferred = candidates.firstOrNull { familyOf(it) == Family.PARAFORMER }
+            val dir = preferred ?: candidates.first()
+            val family = familyOf(dir)
+            val modelFile = modelFileOf(dir) ?: return null
+
             val config = OfflineRecognizerConfig()
             config.featConfig = FeatureConfig().apply {
                 sampleRate = SAMPLE_RATE
@@ -64,10 +73,15 @@ class OfflineAsrEngine private constructor(
                 debug = false
                 modelType = ""
                 tokens = File(dir, "tokens.txt").absolutePath
-                senseVoice = OfflineSenseVoiceModelConfig().apply {
-                    model = File(dir, modelName).absolutePath
-                    language = "auto"
-                    useInverseTextNormalization = false
+                when (family) {
+                    Family.PARAFORMER -> paraformer = OfflineParaformerModelConfig().apply {
+                        model = modelFile.absolutePath
+                    }
+                    Family.SENSE_VOICE -> senseVoice = OfflineSenseVoiceModelConfig().apply {
+                        model = modelFile.absolutePath
+                        language = "auto"
+                        useInverseTextNormalization = false
+                    }
                 }
             }
             config.decodingMethod = "greedy_search"
@@ -81,6 +95,20 @@ class OfflineAsrEngine private constructor(
                 Log.e(TAG, "init failed", t)
                 null
             }
+        }
+
+        private fun familyOf(dir: File): Family =
+            if (dir.name.lowercase(Locale.ROOT).contains("paraformer")) {
+                Family.PARAFORMER
+            } else {
+                Family.SENSE_VOICE
+            }
+
+        private fun modelFileOf(dir: File): File? {
+            val int8 = File(dir, "model.int8.onnx")
+            val fp32 = File(dir, "model.onnx")
+            val file = if (int8.exists()) int8 else if (fp32.exists()) fp32 else return null
+            return if (File(dir, "tokens.txt").exists()) file else null
         }
     }
 }

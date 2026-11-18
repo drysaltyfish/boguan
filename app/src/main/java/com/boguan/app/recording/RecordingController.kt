@@ -238,17 +238,29 @@ object RecordingController {
                 }
                 val segs = repository?.segmentsOf(sessionId).orEmpty()
                 var updated = 0
+                var review = 0
                 for (s in segs) {
                     val text = decodeSegment(engine, samples, s.startMs, s.endMs)
                     if (text.isBlank()) continue
-                    repository?.updateSegmentText(s.id, text)
+                    // 只写二遍稿，不覆盖实时稿（ADR-0010）
+                    repository?.updateSegmentOfflineText(s.id, text)
+                    val flagged = com.boguan.model.TranscriptMerge.needsReview(s.text, text)
+                    if (flagged) review++
                     updated++
                     main.post {
                         val idx = segments.indexOfFirst { it.id == s.id }
-                        if (idx >= 0) segments[idx] = s.copy(text = text, isFinal = true)
+                        if (idx >= 0) {
+                            segments[idx] = s.copy(offlineText = text, isFinal = true)
+                        }
                     }
                 }
-                main.post { statusMessage = "终稿完成（校正 " + updated + "/" + segs.size + " 段）" }
+                main.post {
+                    statusMessage = if (review > 0) {
+                        "终稿二遍完成（" + updated + "/" + segs.size + " 段，" + review + " 段待确认）"
+                    } else {
+                        "终稿二遍完成（" + updated + "/" + segs.size + " 段）"
+                    }
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "final pass failed", t)
                 main.post { statusMessage = "终稿失败：" + (t.message ?: t.javaClass.simpleName) }

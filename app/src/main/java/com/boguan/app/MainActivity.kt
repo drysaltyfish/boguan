@@ -159,8 +159,10 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
             }
         }
         item {
+            val flagged = vm.liveSegments.count { it.needsReview }
             Text(
-                "本场段落（" + vm.liveSegments.size + "）· 点击右侧可回听",
+                "本场段落（" + vm.liveSegments.size + "）· 点击右侧可回听" +
+                    if (flagged > 0) " · 待确认 " + flagged + " 段" else "",
                 style = MaterialTheme.typography.labelMedium,
             )
         }
@@ -219,15 +221,63 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
                 }
             }
         }
+        val review = vm.openedSegments.filter { it.needsReview }
+        if (review.isNotEmpty()) {
+            item {
+                ReviewCard(
+                    segments = review.sortedBy { it.offlineSimilarity }.take(5),
+                    total = review.size,
+                    audioPath = session.audioPath,
+                    onPlay = { seg -> vm.togglePlayback(seg, session.audioPath) },
+                )
+            }
+        }
         item {
             Text(
-                "段落（" + vm.openedSegments.size + "）",
+                "段落（" + vm.openedSegments.size + "）" +
+                    if (review.isNotEmpty()) " · 待确认 " + review.size + " 段" else "",
                 style = MaterialTheme.typography.labelMedium,
             )
         }
         items(vm.openedSegments, key = { "hist-seg-" + it.id }) { seg ->
             SegmentRow(seg, vm.playingSegmentId == seg.id) {
                 vm.togglePlayback(seg, session.audioPath)
+            }
+        }
+    }
+}
+
+/**
+ * 待确认清单（ADR-0004 的一部分）：实时稿与终稿二遍分歧最大的段落，
+ * 两份文本并排给出，点「回听」直接听原音频核对。
+ */
+@Composable
+private fun ReviewCard(
+    segments: List<Segment>,
+    total: Int,
+    audioPath: String?,
+    onPlay: (Segment) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("待确认（" + total + " 段）", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "实时稿与终稿二遍不一致，建议回听核对" +
+                    if (total > segments.size) "（此处先列 " + segments.size + " 段）" else "",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            segments.forEach { seg ->
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "[" + fmtMs(seg.startMs) + " – " + fmtMs(seg.endMs) + "]",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text("实时：" + seg.text, style = MaterialTheme.typography.bodySmall)
+                    if (seg.offlineText.isNotBlank()) {
+                        Text("二遍：" + seg.offlineText, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = { onPlay(seg) }) { Text("回听") }
+                }
             }
         }
     }
@@ -280,7 +330,7 @@ private fun SegmentRow(segment: Segment, playing: Boolean, onPlay: () -> Unit) {
                     "[" + fmtMs(segment.startMs) + " – " + fmtMs(segment.endMs) + "]",
                     style = MaterialTheme.typography.labelSmall,
                 )
-                Text(segment.text, style = MaterialTheme.typography.bodyMedium)
+                Text(segment.displayText, style = MaterialTheme.typography.bodyMedium)
             }
             TextButton(onClick = onPlay) { Text(if (playing) "停止" else "回听") }
         }

@@ -36,6 +36,7 @@ class SessionRepository(private val db: BoguanDatabase) {
             put("text", segment.text)
             put("confidence", segment.confidence)
             put("is_final", if (segment.isFinal) 1 else 0)
+            put("offline_text", segment.offlineText)
         }
         db.writableDatabase.insert("segment", null, values)
     }
@@ -43,7 +44,7 @@ class SessionRepository(private val db: BoguanDatabase) {
     fun segmentsOf(sessionId: String): List<Segment> {
         val out = mutableListOf<Segment>()
         db.readableDatabase.rawQuery(
-            "SELECT id, session_id, start_ms, end_ms, text, confidence, is_final " +
+            "SELECT id, session_id, start_ms, end_ms, text, confidence, is_final, offline_text " +
                 "FROM segment WHERE session_id = ? ORDER BY start_ms",
             arrayOf(sessionId),
         ).use { c ->
@@ -57,6 +58,7 @@ class SessionRepository(private val db: BoguanDatabase) {
                         text = c.getString(4),
                         confidence = c.getFloat(5),
                         isFinal = c.getInt(6) == 1,
+                        offlineText = c.getString(7) ?: "",
                     ),
                 )
             }
@@ -64,17 +66,21 @@ class SessionRepository(private val db: BoguanDatabase) {
         return out
     }
 
-    /** 终稿二遍：用离线结果覆盖实时段文本。 */
-    fun updateSegmentText(segmentId: Long, text: String) {
+    /**
+     * 终稿二遍：保存离线稿到独立列，**不覆盖**实时稿。
+     * 展示文本的选择交给 [com.boguan.model.TranscriptMerge]（ADR-0010）。
+     */
+    fun updateSegmentOfflineText(segmentId: Long, offlineText: String) {
         val values = ContentValues().apply {
-            put("text", text)
+            put("offline_text", offlineText)
             put("is_final", 1)
         }
         db.writableDatabase.update("segment", values, "id = ?", arrayOf(segmentId.toString()))
     }
 
+    /** 转写全文（供摘要/报告用），按展示策略选文本。 */
     fun transcribeAll(sessionId: String): String =
-        segmentsOf(sessionId).joinToString(separator = "\n") { it.text }
+        segmentsOf(sessionId).joinToString(separator = "\n") { it.displayText }
 
     private fun Session.toValues(): ContentValues = ContentValues().apply {
         put("id", id)
