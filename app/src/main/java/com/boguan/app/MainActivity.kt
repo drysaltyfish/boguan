@@ -95,6 +95,10 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
         if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch("android.permission.POST_NOTIFICATIONS")
         vm.refreshHistory()
     }
+    // 结束录音后（回到 IDLE）刷新历史，否则刚录完那场仍显示「时长 —」
+    LaunchedEffect(vm.state) {
+        if (vm.state == SessionState.IDLE) vm.refreshHistory()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
