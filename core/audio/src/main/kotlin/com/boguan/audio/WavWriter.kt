@@ -4,19 +4,22 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * 流式写 16-bit PCM WAV（ADR-0005：录制期保留 WAV，终稿 + 7 天后转 Opus）。
+ * 流式写 16-bit PCM WAV。
  *
- * 头部大小在 [close] 时回填 —— 录制过程中文件只追加数据区，
- * 即使进程被杀，最多丢失尾部未刷新的帧，已写入的部分仍可修复。
+ * 关键设计：**头部按固定间隔回填**（默认 10 秒）。
+ * 只在 close() 时回填的话，进程被系统强杀会留下全零头 → 不可播放的裸 PCM；
+ * 每 10 秒回填一次，最坏只丢最后一段的头，前面的数据仍然可用。
  */
 class WavWriter(
     private val file: File,
     private val sampleRate: Int = SAMPLE_RATE,
     private val channels: Int = 1,
+    private val patchIntervalBytes: Long = SAMPLE_RATE * 2L * PATCH_INTERVAL_SECONDS,
 ) : AutoCloseable {
 
     private val raf: RandomAccessFile
     private var dataBytes: Long = 0
+    private var patchedAtBytes: Long = 0
     private var closed = false
 
     init {
@@ -37,20 +40,36 @@ class WavWriter(
         }
         raf.write(bytes)
         dataBytes += bytes.size
+        if (dataBytes - patchedAtBytes >= patchIntervalBytes) {
+            patchHeader()
+        }
+    }
+
+    /** 立刻回填头（可在暂停、切后台等时机主动调用）。 */
+    fun flushHeader() {
+        if (!closed) patchHeader()
     }
 
     override fun close() {
         if (closed) return
+        patchHeader()
         closed = true
-        runCatching {
-            raf.seek(0)
-            raf.write(buildHeader(dataBytes))
-            raf.setLength(HEADER_SIZE + dataBytes)
-        }
+        runCatching { raf.setLength(HEADER_SIZE + dataBytes) }
         runCatching { raf.close() }
     }
 
     val bytesWritten: Long get() = dataBytes
+
+    private fun patchHeader() {
+        if (closed) return
+        patchedAtBytes = dataBytes
+        runCatching {
+            val pos = raf.filePointer
+            raf.seek(0)
+            raf.write(buildHeader(dataBytes))
+            raf.seek(pos)
+        }
+    }
 
     private fun writePlaceholderHeader() {
         raf.seek(0)
@@ -64,13 +83,13 @@ class WavWriter(
         buf.putInt((36 + dataSize).toInt())
         buf.put("WAVE".toByteArray())
         buf.put("fmt ".toByteArray())
-        buf.putInt(16)                       // fmt chunk size
-        buf.putShort(1)                      // PCM
+        buf.putInt(16)
+        buf.putShort(1)
         buf.putShort(channels.toShort())
         buf.putInt(sampleRate)
         buf.putInt(byteRate)
-        buf.putShort((channels * 2).toShort()) // block align
-        buf.putShort(16)                     // bits per sample
+        buf.putShort((channels * 2).toShort())
+        buf.putShort(16)
         buf.put("data".toByteArray())
         buf.putInt(dataSize.toInt())
         return buf.array()
@@ -79,5 +98,6 @@ class WavWriter(
     companion object {
         const val SAMPLE_RATE = 16_000
         private const val HEADER_SIZE = 44
+        private const val PATCH_INTERVAL_SECONDS = 10L
     }
 }

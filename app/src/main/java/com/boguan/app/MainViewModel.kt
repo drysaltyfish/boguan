@@ -1,27 +1,37 @@
 package com.boguan.app
 
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import com.boguan.app.recording.RecordingController
 import com.boguan.app.recording.RecordingService
 import com.boguan.model.Segment
+import com.boguan.model.Session
 import com.boguan.model.SessionState
 import com.boguan.model.SessionType
+import com.boguan.store.BoguanDatabase
+import com.boguan.store.SessionRepository
 import java.io.File
 
 /**
- * UI 门面：只做两件事 —— 把控制器的可观察状态暴露给 Compose、把用户动作转成服务/控制器调用。
- * 真正的录音逻辑在 [RecordingController]，由前台服务托管（ADR-0005）。
+ * UI 门面：
+ * - 实时录音部分的状态在 [RecordingController]（由前台服务托管）；
+ * - 历史浏览只读，直接查库。
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val controller = RecordingController
     private val player = SegmentPlayer()
+    private val historyRepository = SessionRepository(BoguanDatabase(app))
 
     init {
         controller.ensureInit(app)
+        refreshHistory()
     }
 
+    // ---- 实时录音状态（来自控制器） ----
     val state: SessionState get() = controller.state
     val sessionType: SessionType get() = controller.sessionType
     val engineDescription: String get() = controller.engineDescription
@@ -29,32 +39,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val canRecord: Boolean get() = controller.canRecord
     val partialText: String get() = controller.partialText
     val recordedBytes: Long get() = controller.recordedBytes
-    val segments: List<Segment> get() = controller.segments
+    val liveSegments: List<Segment> get() = controller.segments
+
+    // ---- 历史 ----
+    var history by mutableStateOf<List<Session>>(emptyList())
+        private set
+
+    var openedSession by mutableStateOf<Session?>(null)
+        private set
+
+    var openedSegments by mutableStateOf<List<Segment>>(emptyList())
+        private set
+
     val playingSegmentId: Long? get() = player.playingSegmentId
 
     fun setType(type: SessionType) = controller.setType(type)
-
     fun preload() = controller.preload()
 
-    fun start() {
-        RecordingService.start(getApplication())
-    }
-
+    fun start() = RecordingService.start(getApplication())
     fun pause() = controller.pause()
 
     fun stop() {
         player.stop()
         RecordingService.stop(getApplication())
+        // 结束后刷新历史（当前场已入库）
+        controller.state // 触发一次读取，确保状态最新
+        refreshHistory()
     }
 
-    fun togglePlayback(segment: Segment) {
-        val path = controller.currentAudioPath ?: return
+    fun refreshHistory() {
+        history = runCatching { historyRepository.listSessions() }.getOrDefault(emptyList())
+    }
+
+    fun openSession(session: Session) {
+        player.stop()
+        openedSession = session
+        openedSegments = runCatching { historyRepository.segmentsOf(session.id) }.getOrDefault(emptyList())
+    }
+
+    fun closeSession() {
+        player.stop()
+        openedSession = null
+        openedSegments = emptyList()
+    }
+
+    fun togglePlayback(segment: Segment, audioPath: String?) {
+        val path = audioPath ?: controller.currentAudioPath ?: return
         player.toggle(File(path), segment.id, segment.startMs, segment.endMs)
     }
 
     override fun onCleared() {
         super.onCleared()
         player.stop()
-        // 注意：不在这里停录音 —— 录音由前台服务持有，Activity 销毁不影响
+        // 录音由前台服务持有，Activity 销毁不影响
     }
 }

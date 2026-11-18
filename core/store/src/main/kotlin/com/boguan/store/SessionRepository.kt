@@ -78,6 +78,34 @@ class SessionRepository(private val db: BoguanDatabase) {
         put("audio_path", audioPath)
     }
 
+    /** 历史场次（新的在前）。 */
+    fun listSessions(limit: Int = 100): List<Session> {
+        val out = mutableListOf<Session>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, type, title, started_at_ms, ended_at_ms, state, audio_source, audio_path " +
+                "FROM session ORDER BY started_at_ms DESC LIMIT ?",
+            arrayOf(limit.toString()),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val type = runCatching { SessionType.valueOf(c.getString(1)) }.getOrDefault(SessionType.LECTURE)
+                val state = runCatching { SessionState.valueOf(c.getString(5)) }.getOrDefault(SessionState.DONE)
+                out.add(
+                    Session(
+                        id = c.getString(0),
+                        type = type,
+                        title = c.getString(2) ?: "",
+                        startedAtMs = c.getLong(3),
+                        endedAtMs = if (c.isNull(4)) null else c.getLong(4),
+                        state = state,
+                        audioSource = c.getString(6) ?: "microphone",
+                        audioPath = c.getString(7),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
     /** 读取一场记录的音频路径。 */
     fun audioPathOf(sessionId: String): String? {
         db.readableDatabase.rawQuery(

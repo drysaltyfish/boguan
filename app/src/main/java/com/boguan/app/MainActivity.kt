@@ -2,6 +2,7 @@ package com.boguan.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,8 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boguan.model.Segment
+import com.boguan.model.Session
 import com.boguan.model.SessionState
 import com.boguan.model.SessionType
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -45,7 +49,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    SessionScreen()
+                    RootScreen()
                 }
             }
         }
@@ -53,7 +57,17 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SessionScreen(vm: MainViewModel = viewModel()) {
+private fun RootScreen(vm: MainViewModel = viewModel()) {
+    val opened = vm.openedSession
+    if (opened != null) {
+        HistoryDetailScreen(vm, opened)
+    } else {
+        LiveScreen(vm)
+    }
+}
+
+@Composable
+private fun LiveScreen(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
     var hasPermission by remember {
         mutableStateOf(
@@ -64,17 +78,14 @@ private fun SessionScreen(vm: MainViewModel = viewModel()) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> hasPermission = granted }
-
-    LaunchedEffect(hasPermission) { if (hasPermission) vm.preload() }
-
-    // Android 13+ 通知权限：拿不到也能录音，只是看不到常驻通知
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
+
+    LaunchedEffect(hasPermission) { if (hasPermission) vm.preload() }
     LaunchedEffect(Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            notificationLauncher.launch("android.permission.POST_NOTIFICATIONS")
-        }
+        if (Build.VERSION.SDK_INT >= 33) notificationLauncher.launch("android.permission.POST_NOTIFICATIONS")
+        vm.refreshHistory()
     }
 
     LazyColumn(
@@ -88,80 +99,130 @@ private fun SessionScreen(vm: MainViewModel = viewModel()) {
                 Text(vm.statusMessage, style = MaterialTheme.typography.bodySmall)
             }
         }
-
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = vm.sessionType == SessionType.LECTURE,
-                    onClick = { vm.setType(SessionType.LECTURE) },
-                    label = { Text("课堂") },
-                )
-                FilterChip(
-                    selected = vm.sessionType == SessionType.MEETING,
-                    onClick = { vm.setType(SessionType.MEETING) },
-                    label = { Text("会议") },
-                )
+                FilterChip(vm.sessionType == SessionType.LECTURE, { vm.setType(SessionType.LECTURE) }, { Text("课堂") })
+                FilterChip(vm.sessionType == SessionType.MEETING, { vm.setType(SessionType.MEETING) }, { Text("会议") })
             }
         }
-
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     enabled = hasPermission && vm.canRecord && vm.state == SessionState.IDLE,
                     onClick = { vm.start() },
                 ) { Text("开始") }
-                Button(
-                    enabled = vm.state == SessionState.RECORDING,
-                    onClick = { vm.pause() },
-                ) { Text("暂停") }
+                Button(enabled = vm.state == SessionState.RECORDING, onClick = { vm.pause() }) { Text("暂停") }
                 Button(
                     enabled = vm.state == SessionState.RECORDING || vm.state == SessionState.PAUSED,
                     onClick = { vm.stop() },
                 ) { Text("结束") }
                 if (!hasPermission) {
-                    Button(onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) {
-                        Text("授权麦克风")
-                    }
+                    Button(onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) { Text("授权麦克风") }
                 }
             }
         }
-
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
                     Text("实时", style = MaterialTheme.typography.labelMedium)
                     Text(vm.partialText.ifEmpty { "—" }, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
-
         item {
-            HorizontalDivider()
             Text(
-                "已定稿段落（" + vm.segments.size + "）· 点击右侧可回听",
+                "本场段落（" + vm.liveSegments.size + "）· 点击右侧可回听",
                 style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 4.dp),
             )
         }
+        items(vm.liveSegments, key = { "live-" + it.id }) { seg ->
+            SegmentRow(seg, vm.playingSegmentId == seg.id) {
+                vm.togglePlayback(seg, controllerAudioPath(vm))
+            }
+        }
+        item {
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("历史记录（" + vm.history.size + "）", style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = { vm.refreshHistory() }) { Text("刷新") }
+            }
+        }
+        items(vm.history, key = { "hist-" + it.id }) { s ->
+            HistoryRow(s, onClick = { vm.openSession(s) })
+        }
+    }
+}
 
-        items(vm.segments, key = { it.id }) { segment ->
-            SegmentRow(
-                segment = segment,
-                playing = vm.playingSegmentId == segment.id,
-                onPlay = { vm.togglePlayback(segment) },
+@Composable
+private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("历史场次", style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = { vm.closeSession() }) { Text("返回") }
+            }
+        }
+        item { SessionMeta(session) }
+        item {
+            Text(
+                "段落（" + vm.openedSegments.size + "）",
+                style = MaterialTheme.typography.labelMedium,
             )
+        }
+        items(vm.openedSegments, key = { "hist-seg-" + it.id }) { seg ->
+            SegmentRow(seg, vm.playingSegmentId == seg.id) {
+                vm.togglePlayback(seg, session.audioPath)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(session: Session, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    (if (session.type == SessionType.LECTURE) "课堂" else "会议") + " · " + fmtTime(session.startedAtMs),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    "时长 " + fmtDuration(session) + " · 音频 " + audioSizeLabel(session),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            TextButton(onClick = onClick) { Text("查看") }
+        }
+    }
+}
+
+@Composable
+private fun SessionMeta(session: Session) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                (if (session.type == SessionType.LECTURE) "课堂" else "会议") + " · " + fmtTime(session.startedAtMs),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text("时长 " + fmtDuration(session) + " · 音频 " + audioSizeLabel(session), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
 private fun SegmentRow(segment: Segment, playing: Boolean, onPlay: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            Modifier.fillMaxWidth().padding(10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     "[" + fmtMs(segment.startMs) + " – " + fmtMs(segment.endMs) + "]",
                     style = MaterialTheme.typography.labelSmall,
@@ -173,7 +234,28 @@ private fun SegmentRow(segment: Segment, playing: Boolean, onPlay: () -> Unit) {
     }
 }
 
+/** 当前实时会话的音频路径（历史会话由 Session.audioPath 提供）。 */
+private fun controllerAudioPath(vm: MainViewModel): String? =
+    vm.openedSession?.audioPath ?: com.boguan.app.recording.RecordingController.currentAudioPath
+
 private fun fmtMs(ms: Long): String {
-    val totalSec = ms / 1000
-    return String.format(Locale.US, "%02d:%02d", totalSec / 60, totalSec % 60)
+    val s = ms / 1000
+    return String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
+}
+
+private fun fmtTime(wallMs: Long): String =
+    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(wallMs))
+
+private fun fmtDuration(session: Session): String {
+    val end = session.endedAtMs ?: return "—"
+    val sec = (end - session.startedAtMs) / 1000
+    return String.format(Locale.US, "%d分%02d秒", sec / 60, sec % 60)
+}
+
+private fun audioSizeLabel(session: Session): String {
+    val path = session.audioPath ?: return "—"
+    val f = java.io.File(path)
+    if (!f.isFile) return "—"
+    val kb = f.length() / 1024
+    return if (kb > 1024) String.format(Locale.US, "%.1f MB", kb / 1024.0) else kb.toString() + " KB"
 }
