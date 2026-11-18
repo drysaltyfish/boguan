@@ -43,6 +43,8 @@ object RecordingController {
     private var writer: WavWriter? = null
     private var session: Session? = null
     private var segmentStartMs = 0L
+    private var samplesSinceSegmentStart = 0L
+    private var totalSamplesWritten = 0L
 
     // ---- UI 可观察状态 ----
     var state by mutableStateOf(SessionState.IDLE)
@@ -102,12 +104,12 @@ object RecordingController {
     }
 
     fun start() {
-        if (state != SessionState.IDLE && state != SessionState.PAUSED) return
+        if (state == SessionState.RECORDING || state == SessionState.FINALIZING) return
         val engine = engine ?: run { statusMessage = "模型未就绪"; return }
         val repository = repository ?: return
         val audioStore = audioStore ?: return
 
-        if (state == SessionState.IDLE) {
+        if (state == SessionState.IDLE || state == SessionState.DONE) {
             val newSession = Session(type = sessionType)
             newSession.audioPath = audioStore.audioFile(newSession.id).absolutePath
             session = newSession
@@ -115,6 +117,8 @@ object RecordingController {
             segments.clear()
             partialText = ""
             segmentStartMs = 0L
+            samplesSinceSegmentStart = 0L
+            totalSamplesWritten = 0L
             recordedBytes = 0L
             startedAtWallMs = System.currentTimeMillis()
             writer = runCatching { audioStore.openWriter(newSession.id) }
@@ -158,7 +162,8 @@ object RecordingController {
             if (current != null && repository != null) {
                 repository.finishSession(current.id, System.currentTimeMillis(), SessionState.DONE)
             }
-            state = SessionState.DONE
+            // 单场结束：控制器回到 IDLE，允许立即开始下一场（DONE 是单场终态，不是应用终态）
+            state = SessionState.IDLE
             statusMessage = "已保存 · 音频 " + (recordedBytes / 1024) + " KB"
         }, 0)
     }
@@ -174,6 +179,8 @@ object RecordingController {
 
     private fun onFrame(engine: AsrEngine, samples: ShortArray, count: Int) {
         writer?.write(samples, count)
+        samplesSinceSegmentStart += count
+        totalSamplesWritten += count
         val result = try {
             engine.accept(samples, count)
         } catch (t: Throwable) {
@@ -181,25 +188,28 @@ object RecordingController {
             return
         }
         main.post {
-            recordedBytes = writer?.bytesWritten ?: 0L
+            recordedBytes = totalSamplesWritten * 2
             partialText = result.text
             if (result.isEndpoint && result.text.isNotBlank()) {
-                persistSegment(result.text.trim(), count)
+                persistSegment(result.text.trim())
                 partialText = ""
             }
         }
     }
 
-    private fun persistSegment(text: String, sampleCount: Int) {
+    private fun persistSegment(text: String) {
         val repository = repository ?: return
         val sessionId = session?.id ?: return
+        val startMs = segmentStartMs
+        val endMs = startMs + samplesSinceSegmentStart * 1000L / MicrophoneSource.SAMPLE_RATE
         val segment = Segment(
             sessionId = sessionId,
-            startMs = segmentStartMs,
-            endMs = segmentStartMs + sampleCount * 1000L / MicrophoneSource.SAMPLE_RATE,
+            startMs = startMs,
+            endMs = endMs,
             text = text,
         )
-        segmentStartMs = segment.endMs
+        segmentStartMs = endMs
+        samplesSinceSegmentStart = 0L
         repository.insertSegment(segment)
         repository.segmentsOf(sessionId).lastOrNull()?.let { segments.add(it) }
     }

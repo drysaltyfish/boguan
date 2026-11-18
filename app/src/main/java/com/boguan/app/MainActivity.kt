@@ -85,8 +85,7 @@ private fun SessionScreen(vm: MainViewModel = viewModel()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("博观约取", style = MaterialTheme.typography.headlineSmall)
                 Text(vm.engineDescription, style = MaterialTheme.typography.bodySmall)
-                Text(vm.statusMessage + " · 音频 " + (vm.recordedBytes / 1024) + " KB",
-                    style = MaterialTheme.typography.bodySmall)
+                Text(vm.statusMessage, style = MaterialTheme.typography.bodySmall)
             }
         }
 
