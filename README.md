@@ -6,7 +6,8 @@
 
 **本地优先**：音频与转写永不出设备；只有摘要文本会发送到你**自行配置**的 LLM 端点。
 
-> ⚠️ **当前状态：设计完成，尚无代码。** 本仓库目前只有设计文档（ADR）与术语表。请勿期待可运行产物。
+> ⚠️ **当前状态：设计完成，产品代码尚未开始。**
+> 端上实时转写已通过**技术尖峰**在真机验证（一加 12：RTF **0.085**、首字延迟 **1.60 s**，见下方「验证状态」）。
 
 ## 它想解决什么
 
@@ -31,10 +32,21 @@
 ## 技术栈
 
 - **Kotlin + Jetpack Compose**，核心为纯 Kotlin 模块（无 Android 依赖）
-- 实时 ASR：`sherpa-onnx` 流式 zipformer（端上）
+- 实时 ASR：`sherpa-onnx` + **X-ASR 流式 zipformer（480 ms chunk，Apache-2.0）**（端上）
 - 终稿 ASR：`SenseVoice-Small`（端上离线二遍）
 - LLM：**OpenAI 兼容协议**，供应商与模型可切换（OpenAI / 大陆可直连 / 自定义 `base_url`）
 - 最低 Android 10（API 29）
+
+## 验证状态
+
+技术尖峰（2026-11-18）在**一加 12 / 骁龙 8 Gen 3 / Android 16** 上实测，200.7 秒中文课堂音频、2 线程 CPU：
+
+| 模型变体 | RTF | 首字延迟 | 实时余量 |
+|---|---|---|---|
+| **X-ASR 480ms（默认）** | **0.085** | **1.60 s** | 11.8× |
+| X-ASR 1920ms（省电档） | 0.046 | 2.10 s | 21.6× |
+
+结论：端上实时转写**可行**，首字延迟满足 <2 s 门槛。详见 [ADR-0008](docs/adr/0008-realtime-model-revision.md)。
 
 ## 文档
 
@@ -47,6 +59,7 @@
 | [ADR-0005](docs/adr/0005-local-data-and-recovery.md) | 本地数据与失败恢复 |
 | [ADR-0006](docs/adr/0006-release-and-licensing.md) | 发布、许可与供应链 |
 | [ADR-0007](docs/adr/0007-v0.1-scope-and-acceptance.md) | v0.1 范围、验收门槛、风险登记 |
+| [ADR-0008](docs/adr/0008-realtime-model-revision.md) | 实时模型改版：X-ASR 480ms、Apache-2.0、真机实测 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 数据流向

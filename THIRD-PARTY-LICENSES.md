@@ -20,8 +20,14 @@
 
 | 模型 | 用途 | 许可状态 |
 |---|---|---|
-| `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30` | 实时流式转写 | **上游未声明许可**（Hugging Face model card 无 `license` 字段）。本项目**不随仓库或 Release 分发该权重**，由应用从上游下载；若本项目转为正式对外发布的产品，**必须先清理此项**（见 ADR-0002 R1）。 |
+| **X-ASR** `sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05`（及 1920ms 变体） | 实时流式转写 | **Apache-2.0**（仓库 LICENSE 与 HF 模型卡标签双重确认，来源：`Gilgamesh-J/X-ASR` / `GilgameshWind/X-ASR-zh-en`）。许可证允许再分发，但本项目仍按约定**不把权重放进 Release**，由应用从上游下载。 |
 | SenseVoice-Small int8 | 终稿二遍识别 | 见上表 FunASR Model Open Source License v1.1，须署名 |
+
+## 已弃用的模型
+
+| 模型 | 原因 |
+|---|---|
+| `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30` | 上游未声明权重许可；且与 sherpa-onnx ≥2.0 的 metadata 不兼容、无法加载。已由 X-ASR 取代，见 [ADR-0008](docs/adr/0008-realtime-model-revision.md)。 |
 
 ## 许可未覆盖 / 待定
 
