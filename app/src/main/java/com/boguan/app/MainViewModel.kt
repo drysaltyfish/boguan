@@ -28,11 +28,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val historyRepository = SessionRepository(BoguanDatabase(app))
     private val settings = AppSettings(app)
 
-    init {
-        controller.ensureInit(app)
-        refreshHistory()
-    }
-
     // ---- 实时录音状态（来自控制器） ----
     val state: SessionState get() = controller.state
     val sessionType: SessionType get() = controller.sessionType
@@ -54,6 +49,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     val playingSegmentId: Long? get() = player.playingSegmentId
+
+    // 注意：必须放在所有 mutableStateOf 属性之后 —— Kotlin 的 init 块按源码顺序执行，
+    // 过早执行会读到尚未初始化的委托属性（曾导致启动 NPE）。
+    init {
+        controller.ensureInit(app)
+        refreshHistory()
+    }
 
     // ---- 设置 ----
     val baseUrl: String get() = settings.baseUrl

@@ -90,6 +90,36 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    fun `falls back to json_object when vendor rejects strict schema`(): Unit = runBlocking {
+        val calls = mutableListOf<String>()
+        val transport = object : HttpTransport {
+            override suspend fun post(url: String, headers: Map<String, String>, jsonBody: String): HttpResult {
+                calls.add(jsonBody)
+                return if (calls.size == 1) {
+                    HttpResult(400, """{"error":{"message":"This response_format type is unavailable now"}}""")
+                } else {
+                    HttpResult(200, """{"choices":[{"message":{"content":"{\"title\":\"t\",\"bullets\":[]}"},"finish_reason":"stop"}]}""")
+                }
+            }
+        }
+        val client = OpenAiCompatibleClient(transport)
+        val res = client.complete(
+            endpoint,
+            LlmRequest(
+                purpose = LlmPurpose.MICRO_SUMMARY,
+                systemPrompt = "SYS",
+                userContent = "USR",
+                jsonSchema = """{"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string"}}}""",
+            ),
+        )
+        assertEquals(2, calls.size)
+        assertTrue(calls[0].contains("\"json_schema\""))
+        assertTrue(calls[1].contains("\"json_object\""))
+        assertTrue(calls[1].contains("JSON Schema"))   // schema 内联进 system prompt
+        assertTrue(res.content.isNotBlank())
+    }
+
+    @Test
     fun `http error carries status code`() = runBlocking {
         val transport = FakeTransport(status = 429, body = "rate limited")
         val client = OpenAiCompatibleClient(transport)

@@ -22,8 +22,34 @@ class OpenAiCompatibleClient(
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
 ) {
 
+    /**
+     * 先按严格 JSON Schema 调用；若供应商不支持（如 DeepSeek 返回 400
+     * "This response_format type is unavailable now"），自动降级为 json_object
+     * 模式并把 Schema 内联进 prompt（ADR-0003 的 L2 降级）。
+     */
     suspend fun complete(endpoint: LlmEndpoint, request: LlmRequest): LlmResponse {
-        val body = buildRequestBody(endpoint.model, request)
+        return try {
+            call(endpoint, request, strictSchema = true)
+        } catch (e: LlmHttpException) {
+            val degradable = request.jsonSchema != null &&
+                e.statusCode == 400 &&
+                looksLikeSchemaUnsupported(e.snippet)
+            if (!degradable) throw e
+            call(endpoint, request, strictSchema = false)
+        }
+    }
+
+    private fun looksLikeSchemaUnsupported(snippet: String): Boolean {
+        val s = snippet.lowercase()
+        return s.contains("response_format") || s.contains("json_schema") || s.contains("unavailable")
+    }
+
+    private suspend fun call(
+        endpoint: LlmEndpoint,
+        request: LlmRequest,
+        strictSchema: Boolean,
+    ): LlmResponse {
+        val body = buildRequestBody(endpoint.model, request, strictSchema)
         val url = endpoint.baseUrl.trimEnd('/') + "/chat/completions"
         val result = transport.post(
             url = url,
@@ -58,25 +84,34 @@ class OpenAiCompatibleClient(
         )
     }
 
-    internal fun buildRequestBody(model: String, request: LlmRequest): String {
+    internal fun buildRequestBody(model: String, request: LlmRequest, strictSchema: Boolean = true): String {
+        val systemPrompt = if (!strictSchema && request.jsonSchema != null) {
+            request.systemPrompt + "\n\n必须只输出一个 JSON 对象，且严格符合以下 JSON Schema：\n" + request.jsonSchema
+        } else {
+            request.systemPrompt
+        }
         val obj: JsonObject = buildJsonObject {
             put("model", model)
             put("temperature", request.temperature)
             put("max_completion_tokens", request.maxOutputTokens)
             if (request.jsonSchema != null) {
-                putJsonObject("response_format") {
-                    put("type", "json_schema")
-                    putJsonObject("json_schema") {
-                        put("name", schemaName(request.purpose))
-                        put("strict", true)
-                        put("schema", Json.parseToJsonElement(request.jsonSchema))
+                if (strictSchema) {
+                    putJsonObject("response_format") {
+                        put("type", "json_schema")
+                        putJsonObject("json_schema") {
+                            put("name", schemaName(request.purpose))
+                            put("strict", true)
+                            put("schema", Json.parseToJsonElement(request.jsonSchema))
+                        }
                     }
+                } else {
+                    putJsonObject("response_format") { put("type", "json_object") }
                 }
             }
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "system")
-                    put("content", request.systemPrompt)
+                    put("content", systemPrompt)
                 })
                 add(buildJsonObject {
                     put("role", "user")
