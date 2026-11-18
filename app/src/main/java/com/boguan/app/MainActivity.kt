@@ -67,6 +67,16 @@ private fun SessionScreen(vm: MainViewModel = viewModel()) {
 
     LaunchedEffect(hasPermission) { if (hasPermission) vm.preload() }
 
+    // Android 13+ 通知权限：拿不到也能录音，只是看不到常驻通知
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            notificationLauncher.launch("android.permission.POST_NOTIFICATIONS")
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
