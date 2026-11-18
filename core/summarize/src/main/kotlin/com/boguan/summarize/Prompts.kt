@@ -119,4 +119,162 @@ object Prompts {
         appendLine("【问题】")
         appendLine(question)
     }
+
+    // ---------------- 终稿报告抽取 ----------------
+
+    fun reportSchema(type: SessionType): String = when (type) {
+        SessionType.LECTURE -> LECTURE_REPORT_SCHEMA
+        SessionType.MEETING -> MEETING_REPORT_SCHEMA
+    }
+
+    fun reportSystemPrompt(type: SessionType): String = when (type) {
+        SessionType.LECTURE ->
+            "你是课堂笔记整理器。只依据给定的课堂转写与微摘要生成结构化笔记，禁止编造。" +
+                "作业与截止日期只在原文明确提到时才填，否则给 null；掌握状态按内容判断：" +
+                "老师讲清且无歧义用 CLEAR，提到需要复习/易错用 NEEDS_REVIEW，学生明确表示没听懂用 UNSURE。"
+        SessionType.MEETING ->
+            "你是会议纪要整理器。只依据给定的转写与微摘要生成结构化纪要，禁止编造。" +
+                "负责人与截止日期不确定时必须给 null，不要猜；决定状态只能是四个枚举值之一。"
+    }
+
+    fun reportUserPrompt(transcript: String, summaries: String): String = buildString {
+        appendLine("【微摘要】")
+        appendLine(summaries.ifBlank { "（无）" })
+        appendLine()
+        appendLine("【完整转写】")
+        appendLine(transcript)
+    }
+
+    private val LECTURE_REPORT_SCHEMA = """
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["one_liner", "key_points", "assignments", "emphasis", "questions", "topics"],
+      "properties": {
+        "one_liner": { "type": "string", "description": "一句话概括整节课，不超过 40 字" },
+        "key_points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "detail", "status"],
+            "properties": {
+              "title": { "type": "string", "description": "知识点名称，不超过 15 字" },
+              "detail": { "type": "string", "description": "解释，不超过 120 字" },
+              "status": { "type": "string", "enum": ["CLEAR", "NEEDS_REVIEW", "UNSURE"] }
+            }
+          }
+        },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "deadline"],
+            "properties": {
+              "text": { "type": "string" },
+              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+            }
+          }
+        },
+        "emphasis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "kind"],
+            "properties": {
+              "text": { "type": "string" },
+              "kind": { "type": "string", "enum": ["EXAM", "KEY", "PITFALL"] }
+            }
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "answer"],
+            "properties": {
+              "text": { "type": "string" },
+              "answer": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+            }
+          }
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title"],
+            "properties": { "title": { "type": "string" } }
+          }
+        }
+      }
+    }
+    """.trimIndent()
+
+    private val MEETING_REPORT_SCHEMA = """
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["one_liner", "decisions", "action_items", "risks", "open_questions", "topics"],
+      "properties": {
+        "one_liner": { "type": "string", "description": "一句话概括会议结论，不超过 40 字" },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "status"],
+            "properties": {
+              "text": { "type": "string" },
+              "status": { "type": "string", "enum": ["AGREED", "PENDING", "DISPUTED", "SHELVED"] }
+            }
+          }
+        },
+        "action_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "owner", "deadline"],
+            "properties": {
+              "text": { "type": "string" },
+              "owner": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+            }
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": { "text": { "type": "string" } }
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": { "text": { "type": "string" } }
+          }
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title"],
+            "properties": { "title": { "type": "string" } }
+          }
+        }
+      }
+    }
+    """.trimIndent()
 }
+

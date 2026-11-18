@@ -115,7 +115,10 @@ object ReportRenderer {
             sb.appendLine("## 分主题要点")
             sb.appendLine()
             payload.envelope.topics.forEach { t ->
-                sb.appendLine("### " + t.title + "（" + fmtMs(t.startMs) + " – " + fmtMs(t.endMs) + "）")
+                val range = if (t.startMs == 0L && t.endMs == 0L) "" else {
+                    "（" + fmtMs(t.startMs) + " – " + fmtMs(t.endMs) + "）"
+                }
+                sb.appendLine("### " + t.title + range)
                 sb.appendLine()
             }
         }

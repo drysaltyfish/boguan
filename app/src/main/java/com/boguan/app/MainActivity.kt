@@ -177,7 +177,7 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
             }
         }
         items(vm.history, key = { "hist-" + it.id }) { s ->
-            HistoryRow(s, onClick = { vm.openSession(s) })
+            HistoryRow(s, onClick = { vm.openSessionWithReport(s) })
         }
     }
 }
@@ -195,6 +195,30 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
             }
         }
         item { SessionMeta(session) }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("结构化报告", style = MaterialTheme.typography.labelLarge)
+                        TextButton(
+                            enabled = !vm.reportStatus.startsWith("生成中"),
+                            onClick = { vm.generateReport(session) },
+                        ) { Text("生成报告") }
+                    }
+                    if (vm.reportStatus.isNotBlank()) {
+                        Text(vm.reportStatus, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (vm.reportText.isNotBlank()) {
+                        Text(
+                            vm.reportText,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        }
         item {
             Text(
                 "段落（" + vm.openedSegments.size + "）",

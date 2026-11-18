@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.boguan.app.recording.RecordingController
 import com.boguan.app.recording.RecordingService
 import com.boguan.model.Segment
@@ -13,7 +14,13 @@ import com.boguan.model.SessionState
 import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
 import com.boguan.app.settings.AppSettings
+import com.boguan.report.ReportRenderer
 import com.boguan.store.SessionRepository
+import com.boguan.summarize.OpenAiCompatibleClient
+import com.boguan.summarize.ReportParser
+import com.boguan.summarize.ReportService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -97,6 +104,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         player.stop()
         openedSession = null
         openedSegments = emptyList()
+    }
+
+    // ---- 报告 ----
+    var reportText by mutableStateOf("")
+        private set
+    var reportStatus by mutableStateOf("")
+        private set
+
+    fun openSessionWithReport(session: Session) {
+        openSession(session)
+        reportText = runCatching { historyRepository.latestReport(session.id) }.getOrNull().orEmpty()
+        reportStatus = if (reportText.isBlank()) "" else "已加载上次生成的报告"
+    }
+
+    fun generateReport(session: Session) {
+        val endpoint = settings.endpointOrNull()
+        if (endpoint == null) {
+            reportStatus = "未配置 API key，无法生成报告"
+            return
+        }
+        if (reportStatus.startsWith("生成中")) return
+        reportStatus = "生成中（LLM 抽取）…"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val segments = historyRepository.segmentsOf(session.id)
+                val transcript = segments.joinToString("\n") { it.text }
+                if (transcript.isBlank()) {
+                    reportStatus = "本场没有转写内容"
+                    return@launch
+                }
+                val summaries = historyRepository.microSummariesOf(session.id)
+                    .joinToString("\n") { it.payloadJson }
+                val response = ReportService(OpenAiCompatibleClient())
+                    .generate(endpoint, session.type, transcript, summaries)
+                val payload = ReportParser.parse(response.content, session.type)
+                val markdown = ReportRenderer.render(session, payload, transcript)
+                historyRepository.insertReport(session.id, session.type, response.content, markdown)
+                reportText = markdown
+                reportStatus = "报告已生成（" + response.inputTokens + "→" + response.outputTokens + " tokens）"
+            } catch (t: Throwable) {
+                reportStatus = "生成失败：" + (t.message ?: t.javaClass.simpleName)
+            }
+        }
     }
 
     fun togglePlayback(segment: Segment, audioPath: String?) {

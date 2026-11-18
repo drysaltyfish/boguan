@@ -9,8 +9,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.boguan.asr.AsrEngine
+import com.boguan.asr.OfflineAsrEngine
 import com.boguan.audio.MicrophoneSource
 import com.boguan.audio.SessionAudioStore
+import com.boguan.audio.WavPcmReader
 import com.boguan.audio.WavWriter
 import com.boguan.model.Segment
 import com.boguan.model.Session
@@ -209,7 +211,66 @@ object RecordingController {
             // 单场结束：控制器回到 IDLE，允许立即开始下一场（DONE 是单场终态，不是应用终态）
             state = SessionState.IDLE
             statusMessage = "已保存 · 音频 " + (recordedBytes / 1024) + " KB"
+            val audioPath = current?.audioPath
+            if (current != null && audioPath != null) {
+                runFinalPass(current.id, audioPath)
+            }
         }, 0)
+    }
+
+    // ---------------- 终稿二遍（ADR-0002） ----------------
+
+    /** 用离线模型按实时段的起止时间重跑一遍，覆盖段文本；失败不影响已保存的实时稿。 */
+    private fun runFinalPass(sessionId: String, wavPath: String) {
+        ioScope.launch {
+            val modelsRoot = appContext?.let { File(it.getExternalFilesDir(null), "model") } ?: return@launch
+            main.post { statusMessage = "终稿处理中（离线模型）…" }
+            val engine = OfflineAsrEngine.create(modelsRoot)
+            if (engine == null) {
+                main.post { statusMessage = "终稿模型未安装，保留实时稿" }
+                return@launch
+            }
+            try {
+                val samples = WavPcmReader.read(File(wavPath))
+                if (samples == null) {
+                    main.post { statusMessage = "终稿失败：音频不可读" }
+                    return@launch
+                }
+                val segs = repository?.segmentsOf(sessionId).orEmpty()
+                var updated = 0
+                for (s in segs) {
+                    val text = decodeSegment(engine, samples, s.startMs, s.endMs)
+                    if (text.isBlank()) continue
+                    repository?.updateSegmentText(s.id, text)
+                    updated++
+                    main.post {
+                        val idx = segments.indexOfFirst { it.id == s.id }
+                        if (idx >= 0) segments[idx] = s.copy(text = text, isFinal = true)
+                    }
+                }
+                main.post { statusMessage = "终稿完成（校正 " + updated + "/" + segs.size + " 段）" }
+            } catch (t: Throwable) {
+                Log.e(TAG, "final pass failed", t)
+                main.post { statusMessage = "终稿失败：" + (t.message ?: t.javaClass.simpleName) }
+            } finally {
+                engine.release()
+            }
+        }
+    }
+
+    private fun decodeSegment(engine: OfflineAsrEngine, all: FloatArray, startMs: Long, endMs: Long): String {
+        val slice = WavPcmReader.slice(all, startMs, endMs)
+        if (slice.size < WavPcmReader.SAMPLE_RATE / 2) return ""
+        val maxWindow = OfflineAsrEngine.MAX_WINDOW_SECONDS * WavPcmReader.SAMPLE_RATE
+        if (slice.size <= maxWindow) return engine.transcribe(slice)
+        val sb = StringBuilder()
+        var offset = 0
+        while (offset < slice.size) {
+            val end = minOf(offset + maxWindow, slice.size)
+            sb.append(engine.transcribe(slice.copyOfRange(offset, end))).append(' ')
+            offset = end
+        }
+        return sb.toString().trim()
     }
 
     // ---------------- 摘要调度（ADR-0003） ----------------

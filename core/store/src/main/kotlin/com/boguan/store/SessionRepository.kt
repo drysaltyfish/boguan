@@ -64,6 +64,15 @@ class SessionRepository(private val db: BoguanDatabase) {
         return out
     }
 
+    /** 终稿二遍：用离线结果覆盖实时段文本。 */
+    fun updateSegmentText(segmentId: Long, text: String) {
+        val values = ContentValues().apply {
+            put("text", text)
+            put("is_final", 1)
+        }
+        db.writableDatabase.update("segment", values, "id = ?", arrayOf(segmentId.toString()))
+    }
+
     fun transcribeAll(sessionId: String): String =
         segmentsOf(sessionId).joinToString(separator = "\n") { it.text }
 
@@ -76,6 +85,27 @@ class SessionRepository(private val db: BoguanDatabase) {
         put("state", state.name)
         put("audio_source", audioSource)
         put("audio_path", audioPath)
+    }
+
+    fun insertReport(sessionId: String, type: com.boguan.model.SessionType, payloadJson: String, renderedMd: String) {
+        val values = ContentValues().apply {
+            put("session_id", sessionId)
+            put("generated_at_ms", System.currentTimeMillis())
+            put("session_type", type.name)
+            put("schema_version", 1)
+            put("payload_json", payloadJson)
+            put("rendered_md", renderedMd)
+        }
+        db.writableDatabase.insertWithOnConflict(
+            "report", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    fun latestReport(sessionId: String): String? {
+        db.readableDatabase.rawQuery(
+            "SELECT rendered_md FROM report WHERE session_id = ? ORDER BY generated_at_ms DESC LIMIT 1",
+            arrayOf(sessionId),
+        ).use { c -> return if (c.moveToFirst()) c.getString(0) else null }
     }
 
     fun insertMicroSummary(summary: com.boguan.model.MicroSummary) {
