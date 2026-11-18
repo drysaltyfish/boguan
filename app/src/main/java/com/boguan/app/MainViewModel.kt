@@ -3,12 +3,15 @@ package com.boguan.app
 import android.app.Application
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.boguan.asr.AsrEngine
 import com.boguan.audio.MicrophoneSource
+import com.boguan.audio.SessionAudioStore
+import com.boguan.audio.WavWriter
 import com.boguan.model.Segment
 import com.boguan.model.Session
 import com.boguan.model.SessionState
@@ -20,17 +23,19 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * 录音 + 实时转写的最小闭环（薄壳层，业务在 core 模块）。
+ * 录音 + 实时转写 + 音频落盘的最小闭环。
  * 状态机：idle → recording ⇄ paused → finalizing → done
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = SessionRepository(BoguanDatabase(app))
+    private val audioStore = SessionAudioStore(File(app.filesDir, "sessions"))
     private val source = MicrophoneSource()
+    private val player = SegmentPlayer()
     private var engine: AsrEngine? = null
     private var session: Session? = null
+    private var writer: WavWriter? = null
     private var segmentStartMs = 0L
-    private val sessionStartedElapsed = 0L
 
     var state by mutableStateOf(SessionState.IDLE)
         private set
@@ -40,18 +45,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var partialText by mutableStateOf("")
         private set
-    var finalizedText by mutableStateOf("")
-        private set
     var statusMessage by mutableStateOf("")
         private set
     var canRecord by mutableStateOf(false)
         private set
+    var recordedBytes by mutableStateOf(0L)
+        private set
+
+    val segments = mutableStateListOf<Segment>()
+
+    val playingSegmentId: Long? get() = player.playingSegmentId
 
     fun setType(type: SessionType) {
         if (state == SessionState.IDLE) sessionType = type
     }
 
-    /** 预加载模型（进入界面时调用一次；加载耗时约 3–4 s）。 */
     fun preload() {
         if (engine != null) return
         viewModelScope.launch(Dispatchers.Default) {
@@ -72,6 +80,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun start() {
         if (state != SessionState.IDLE && state != SessionState.PAUSED) return
         val engine = engine ?: return
+
+        if (state == SessionState.IDLE) {
+            val newSession = Session(type = sessionType)
+            newSession.audioPath = audioStore.audioFile(newSession.id).absolutePath
+            session = newSession
+            repository.createSession(newSession)
+            segments.clear()
+            partialText = ""
+            segmentStartMs = 0L
+            writer = runCatching { audioStore.openWriter(newSession.id) }
+                .onFailure { Log.e(TAG, "open wav writer failed", it) }
+                .getOrNull()
+        }
+
         if (!source.isRunning) {
             val ok = source.start { samples, count -> onFrame(engine, samples, count) }
             if (!ok) {
@@ -79,16 +101,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
         }
-        if (state == SessionState.IDLE) {
-            val newSession = Session(type = sessionType)
-            session = newSession
-            repository.createSession(newSession)
-            segmentStartMs = 0L
-            finalizedText = ""
-        }
         state = SessionState.RECORDING
         session?.let { repository.updateState(it.id, SessionState.RECORDING) }
-        statusMessage = "正在记录"
+        statusMessage = "正在记录（音频同时写入本地）"
     }
 
     fun pause() {
@@ -101,6 +116,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() {
         if (state != SessionState.RECORDING && state != SessionState.PAUSED) return
         source.stop()
+        writer?.close()
+        writer = null
+        player.stop()
         state = SessionState.FINALIZING
         statusMessage = "收尾中…"
         val current = session
@@ -109,11 +127,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repository.finishSession(current.id, System.currentTimeMillis(), SessionState.DONE)
             }
             state = SessionState.DONE
-            statusMessage = "已保存（终稿与摘要功能开发中）"
+            statusMessage = "已保存 · 音频 " + (recordedBytes / 1024 / 1024) + " MB"
         }
     }
 
+    fun togglePlayback(segment: Segment) {
+        val path = session?.audioPath ?: return
+        player.toggle(File(path), segment.id, segment.startMs, segment.endMs)
+    }
+
     private fun onFrame(engine: AsrEngine, samples: ShortArray, count: Int) {
+        writer?.write(samples, count)
+        recordedBytes = writer?.bytesWritten ?: 0L
+
         val result = try {
             engine.accept(samples, count)
         } catch (t: Throwable) {
@@ -126,21 +152,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val segment = Segment(
                 sessionId = sessionId,
                 startMs = segmentStartMs,
-                endMs = segmentStartMs + count * 1000L / 16_000,
+                endMs = segmentStartMs + count * 1000L / MicrophoneSource.SAMPLE_RATE,
                 text = result.text.trim(),
-                isFinal = false,
             )
             segmentStartMs = segment.endMs
             repository.insertSegment(segment)
-            finalizedText = (finalizedText + " " + segment.text).trim()
+            // 回读以拿到自增 id（回听需要 id 作为播放句柄）
+            val inserted = repository.segmentsOf(sessionId).lastOrNull()
+            if (inserted != null) segments.add(inserted)
             partialText = ""
         }
     }
 
     fun release() {
         source.stop()
+        writer?.close()
+        writer = null
+        player.stop()
         engine?.release()
         engine = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        release()
     }
 
     companion object {

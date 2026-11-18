@@ -75,6 +75,14 @@ class SessionRepository(private val db: BoguanDatabase) {
         put("ended_at_ms", endedAtMs)
         put("state", state.name)
         put("audio_source", audioSource)
+        put("audio_path", audioPath)
+    }
+
+    /** 读取一场记录的音频路径。 */
+    fun audioPathOf(sessionId: String): String? {
+        db.readableDatabase.rawQuery(
+            "SELECT audio_path FROM session WHERE id = ?", arrayOf(sessionId),
+        ).use { c -> return if (c.moveToFirst()) c.getString(0) else null }
     }
 
     companion object {

@@ -23,7 +23,8 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
                 started_at_ms INTEGER NOT NULL,
                 ended_at_ms INTEGER,
                 state TEXT NOT NULL,
-                audio_source TEXT NOT NULL
+                audio_source TEXT NOT NULL,
+                audio_path TEXT
             )
             """.trimIndent(),
         )
@@ -103,11 +104,13 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // v0.1 尚无线上数据；后续升级按迁移脚本处理
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE session ADD COLUMN audio_path TEXT")
+        }
     }
 
     companion object {
         const val DB_NAME = "boguan.db"
-        const val DB_VERSION = 1
+        const val DB_VERSION = 2
     }
 }

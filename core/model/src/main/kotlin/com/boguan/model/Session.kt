@@ -28,6 +28,8 @@ data class Session(
     var endedAtMs: Long? = null,
     var state: SessionState = SessionState.IDLE,
     val audioSource: String = "microphone",
+    /** 本地音频文件路径（WAV）；为空表示尚未落盘。 */
+    var audioPath: String? = null,
 )
 
 /** 转写段。isFinal=false 为实时稿，true 为终稿。 */
