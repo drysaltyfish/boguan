@@ -10,12 +10,13 @@ class ReportService(private val client: OpenAiCompatibleClient) {
         type: SessionType,
         transcript: String,
         summaries: String,
+        hints: String = "",
     ): LlmResponse = client.complete(
         endpoint,
         LlmRequest(
             purpose = LlmPurpose.REPORT_EXTRACTION,
             systemPrompt = Prompts.reportSystemPrompt(type),
-            userContent = Prompts.reportUserPrompt(transcript, summaries),
+            userContent = Prompts.reportUserPrompt(transcript, summaries, hints),
             jsonSchema = Prompts.reportSchema(type),
             maxOutputTokens = 2_500,
             temperature = 0.3,

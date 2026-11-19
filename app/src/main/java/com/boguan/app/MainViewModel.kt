@@ -15,6 +15,8 @@ import com.boguan.model.SessionState
 import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
 import com.boguan.app.settings.AppSettings
+import com.boguan.model.TranscriptMerge
+import com.boguan.report.ReportAnchorer
 import com.boguan.report.ReportRenderer
 import com.boguan.store.SessionRepository
 import com.boguan.summarize.ConsolidatedParser
@@ -194,9 +196,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val summaries = historyRepository.microSummariesOf(session.id)
                     .joinToString("\n") { it.payloadJson }
+                // 可疑点提示：实时稿与校正稿差异最大的段落（听错最可能发生在这里）
+                val hints = segments
+                    .filter { it.correctedText.isNotBlank() && it.text != it.correctedText }
+                    .sortedBy { TranscriptMerge.similarity(it.text, it.correctedText) }
+                    .take(8)
+                    .joinToString("\n") { s ->
+                        "[" + stamp(s.startMs) + " – " + stamp(s.endMs) + "] 实时：" +
+                            s.text + " / 校正：" + s.correctedText
+                    }
                 val response = ReportService(OpenAiCompatibleClient())
-                    .generate(endpoint, session.type, transcript, summaries)
-                val payload = ReportParser.parse(response.content, session.type)
+                    .generate(endpoint, session.type, transcript, summaries, hints)
+                val payload = ReportAnchorer.anchor(
+                    ReportParser.parse(response.content, session.type),
+                    segments,
+                )
                 val markdown = ReportRenderer.render(session, payload, transcript)
                 historyRepository.insertReport(session.id, session.type, response.content, markdown)
                 reportText = markdown
@@ -210,6 +224,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun togglePlayback(segment: Segment, audioPath: String?) {
         val path = audioPath ?: controller.currentAudioPath ?: return
         player.toggle(File(path), segment.id, segment.startMs, segment.endMs)
+    }
+
+    private fun stamp(ms: Long): String {
+        val totalSeconds = ms / 1000
+        return String.format(java.util.Locale.US, "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
     }
 
     /** 历史详情里的阶段小结视图。 */

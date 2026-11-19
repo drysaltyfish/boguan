@@ -9,10 +9,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.boguan.asr.AsrEngine
-import com.boguan.asr.OfflineAsrEngine
 import com.boguan.audio.MicrophoneSource
 import com.boguan.audio.SessionAudioStore
-import com.boguan.audio.WavPcmReader
 import com.boguan.audio.WavWriter
 import com.boguan.model.Segment
 import com.boguan.model.Session
@@ -256,45 +254,40 @@ object RecordingController {
             // 单场结束：控制器回到 IDLE，允许立即开始下一场（DONE 是单场终态，不是应用终态）
             state = SessionState.IDLE
             statusMessage = "已保存 · 音频 " + (recordedBytes / 1024) + " KB"
-            val audioPath = current?.audioPath
-            if (current != null && audioPath != null) {
-                runFinalPass(current.id, audioPath)
+            if (current != null) {
+                runFinalPass(current.id)
             }
         }, 0)
     }
 
     // ---------------- 终稿：离线二遍 + LLM 校正（ADR-0010 / ADR-0011） ----------------
 
-    /** 历史场次重跑终稿：重写离线稿与校正稿，不动实时稿。 */
+    /** 历史场次重跑终稿：重跑 LLM 校正，不动实时稿。 */
     fun reprocessSession(sessionId: String) {
         if (finalPassRunning) return
-        val path = repository?.audioPathOf(sessionId)
-        if (path == null) {
-            finalPassStatus = "没有音频文件，无法重跑终稿"
-            return
-        }
-        runFinalPass(sessionId, path)
+        runFinalPass(sessionId)
     }
 
-    private fun runFinalPass(sessionId: String, wavPath: String) {
+    private fun runFinalPass(sessionId: String) {
         if (finalPassRunning) return
         finalPassRunning = true
         ioScope.launch {
             try {
-                setFinalStatus("终稿处理中（离线二遍）…")
-                if (!runOfflinePass(sessionId, wavPath)) return@launch
                 val segs = repository?.segmentsOf(sessionId).orEmpty()
-                val review = segs.count { it.needsReview }
-                val offlineNote = "离线二遍完成（" + segs.size + " 段" +
-                    (if (review > 0) "，" + review + " 段待确认" else "") + "）"
-                setFinalStatus(offlineNote)
+                if (segs.isEmpty()) {
+                    setFinalStatus("终稿跳过：本场没有转写内容")
+                    return@launch
+                }
                 val type = repository?.typeOf(sessionId) ?: sessionType
+                setFinalStatus("终稿校正中…")
                 val correction = runCorrectionPass(segs, type)
+                val review = repository?.segmentsOf(sessionId).orEmpty().count { it.needsReview }
                 when {
-                    correction == null -> setFinalStatus(offlineNote)
-                    correction.first == 0 -> setFinalStatus(offlineNote + " · 校正未改动文本")
+                    correction == null -> setFinalStatus("终稿未校正：保留实时稿（" + segs.size + " 段）")
+                    correction.first == 0 -> setFinalStatus("终稿完成（校正未改动文本，" + segs.size + " 段）")
                     else -> setFinalStatus(
-                        "终稿完成（校正 " + correction.first + "/" + segs.size + " 段）",
+                        "终稿完成（校正 " + correction.first + "/" + segs.size + " 段" +
+                            (if (review > 0) "，" + review + " 段待确认" else "") + "）",
                     )
                 }
             } catch (t: Throwable) {
@@ -303,34 +296,6 @@ object RecordingController {
             } finally {
                 finalPassRunning = false
             }
-        }
-    }
-
-    /** 离线模型按实时段的时间边界重跑，写入 offline_text。失败不影响已有文本。 */
-    private suspend fun runOfflinePass(sessionId: String, wavPath: String): Boolean {
-        val modelsRoot = appContext?.let { File(it.getExternalFilesDir(null), "model") } ?: return false
-        val engine = OfflineAsrEngine.create(modelsRoot) ?: run {
-            setFinalStatus("离线模型未安装，跳过离线二遍")
-            return false
-        }
-        try {
-            val samples = WavPcmReader.read(File(wavPath)) ?: run {
-                setFinalStatus("终稿失败：音频不可读")
-                return false
-            }
-            val segs = repository?.segmentsOf(sessionId).orEmpty()
-            for (s in segs) {
-                val text = decodeSegment(engine, samples, s.startMs, s.endMs)
-                if (text.isBlank()) continue
-                repository?.updateSegmentOfflineText(s.id, text)
-                main.post {
-                    val idx = segments.indexOfFirst { it.id == s.id }
-                    if (idx >= 0) segments[idx] = segments[idx].copy(offlineText = text, isFinal = true)
-                }
-            }
-            return true
-        } finally {
-            engine.release()
         }
     }
 
@@ -437,21 +402,6 @@ object RecordingController {
     private fun setFinalStatus(text: String) {
         finalPassStatus = text
         statusMessage = text
-    }
-
-    private fun decodeSegment(engine: OfflineAsrEngine, all: FloatArray, startMs: Long, endMs: Long): String {
-        val slice = WavPcmReader.slice(all, startMs, endMs)
-        if (slice.size < WavPcmReader.SAMPLE_RATE / 2) return ""
-        val maxWindow = OfflineAsrEngine.MAX_WINDOW_SECONDS * WavPcmReader.SAMPLE_RATE
-        if (slice.size <= maxWindow) return engine.transcribe(slice)
-        val sb = StringBuilder()
-        var offset = 0
-        while (offset < slice.size) {
-            val end = minOf(offset + maxWindow, slice.size)
-            sb.append(engine.transcribe(slice.copyOfRange(offset, end))).append(' ')
-            offset = end
-        }
-        return sb.toString().trim()
     }
 
     // ---------------- 摘要调度（ADR-0003） ----------------

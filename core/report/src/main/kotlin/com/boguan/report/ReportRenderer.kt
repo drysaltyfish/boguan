@@ -26,11 +26,12 @@ object ReportRenderer {
             sb.appendLine(payload.envelope.oneLiner)
             sb.appendLine()
         }
+        // 待确认清单放报告顶部（ADR-0004）：先让人看到哪里可能不准，再读正文
+        renderUnverified(sb, payload)
         when (session.type) {
             SessionType.LECTURE -> renderLecture(sb, payload)
             SessionType.MEETING -> renderMeeting(sb, payload)
         }
-        renderUnverified(sb, payload)
         renderQa(sb, payload)
         if (transcript.isNotBlank()) {
             sb.appendLine("## 转写全文附录")

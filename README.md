@@ -18,7 +18,7 @@
 
 - 端上实时转写（Google Pixel Recorder 证明可行，但没有会议产品这么做）
 - 每 2 分钟一条类型化微摘要，滚动显示；每 10 分钟合并去重成阶段小结
-- 停录后在手机本地再跑一遍（Paraformer 离线模型），实时稿与二遍稿并存，分歧大的段落进「待确认」
+- 停录后用 LLM 校正转写（实时稿保留、校正稿另存），分歧大的段落进「待确认」；报告顶部汇总待确认清单并带时间锚点
 - 终稿抽取成结构化笔记：**课堂笔记**（知识点 / 考点 / 作业）或**会议纪要**（决议 / 待办 / 风险）
 - 每个要点可**一键回听**对应原音；两稿不一致的内容标「待确认」
 
@@ -34,7 +34,7 @@
 
 - **Kotlin + Jetpack Compose**，核心为纯 Kotlin 模块（无 Android 依赖）
 - 实时 ASR：`sherpa-onnx` + **X-ASR 流式 zipformer（默认 1920 ms chunk，可选 480 ms，Apache-2.0）**（端上）
-- 终稿 ASR：`Paraformer-zh` int8（端上离线二遍；SenseVoice 仍作备选，见 [ADR-0010](docs/adr/0010-two-pass-text-policy.md)）
+- 终稿校正：把「实时稿 + 术语表 + 上下文」交给用户配置的 LLM 做同音字/术语校正（[ADR-0011](docs/adr/0011-llm-transcript-correction.md)）；不再内置离线 ASR 模型（[ADR-0013](docs/adr/0013-remove-offline-pass.md)）
 - LLM：**OpenAI 兼容协议**，供应商与模型可切换（OpenAI / 大陆可直连 / 自定义 `base_url`）
 - 最低 Android 10（API 29）
 
@@ -67,6 +67,7 @@
 | [ADR-0010](docs/adr/0010-two-pass-text-policy.md) | 二遍稿文本策略：两稿并存不覆盖，以分歧驱动待确认 |
 | [ADR-0011](docs/adr/0011-llm-transcript-correction.md) | 终稿 LLM 校正：用语言模型修同音错（并更新隐私表述） |
 | [ADR-0012](docs/adr/0012-realtime-tier-1920ms.md) | 实时档位：默认 1920 ms（错误率 10.6% vs 15.9%） |
+| [ADR-0013](docs/adr/0013-remove-offline-pass.md) | 移除离线二遍 ASR：终稿只保留 LLM 校正 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 工程结构

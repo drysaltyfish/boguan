@@ -285,13 +285,27 @@ object Prompts {
         SessionType.LECTURE ->
             "你是课堂笔记整理器。只依据给定的课堂转写与微摘要生成结构化笔记，禁止编造。" +
                 "作业与截止日期只在原文明确提到时才填，否则给 null；掌握状态按内容判断：" +
-                "老师讲清且无歧义用 CLEAR，提到需要复习/易错用 NEEDS_REVIEW，学生明确表示没听懂用 UNSURE。"
+                "老师讲清且无歧义用 CLEAR，提到需要复习/易错用 NEEDS_REVIEW，学生明确表示没听懂用 UNSURE。" +
+                "另外把「转写可能不准、需要人耳核对」的片段放进 unverified：" +
+                "数字、人名、书名、日期、金额、作业要求、关键术语——尤其是看起来像同音错或前后矛盾的表述；" +
+                "不确定就不要硬写进正文，宁可放进 unverified。"
         SessionType.MEETING ->
             "你是会议纪要整理器。只依据给定的转写与微摘要生成结构化纪要，禁止编造。" +
-                "负责人与截止日期不确定时必须给 null，不要猜；决定状态只能是四个枚举值之一。"
+                "负责人与截止日期不确定时必须给 null，不要猜；决定状态只能是四个枚举值之一。" +
+                "另外把「转写可能不准、需要人耳核对」的片段放进 unverified：" +
+                "人名、数字、日期、金额、负责人、决议措辞——尤其是同音错或前后矛盾的表述。"
     }
 
-    fun reportUserPrompt(transcript: String, summaries: String): String = buildString {
+    /**
+     * [hints] 是「转写可疑点」提示：实时稿与 LLM 校正稿差异较大的段落，
+     * 提示模型这些地方可能听错，应当重点核对（会进入 unverified）。
+     */
+    fun reportUserPrompt(transcript: String, summaries: String, hints: String = ""): String = buildString {
+        if (hints.isNotBlank()) {
+            appendLine("【转写可疑点（实时稿与校正稿差异较大的段落）】")
+            appendLine(hints)
+            appendLine()
+        }
         appendLine("【微摘要】")
         appendLine(summaries.ifBlank { "（无）" })
         appendLine()
@@ -303,7 +317,7 @@ object Prompts {
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["one_liner", "key_points", "assignments", "emphasis", "questions", "topics"],
+      "required": ["one_liner", "key_points", "assignments", "emphasis", "questions", "topics", "unverified"],
       "properties": {
         "one_liner": { "type": "string", "description": "一句话概括整节课，不超过 40 字" },
         "key_points": {
@@ -363,6 +377,19 @@ object Prompts {
             "required": ["title"],
             "properties": { "title": { "type": "string" } }
           }
+        },
+        "unverified": {
+          "type": "array",
+          "description": "转写可能不准、需要人耳核对的条目（数字/人名/日期/金额/作业要求/术语），没有则为空数组",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "reason"],
+            "properties": {
+              "text": { "type": "string", "description": "原文里的可疑片段，尽量照抄" },
+              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" }
+            }
+          }
         }
       }
     }
@@ -372,7 +399,7 @@ object Prompts {
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["one_liner", "decisions", "action_items", "risks", "open_questions", "topics"],
+      "required": ["one_liner", "decisions", "action_items", "risks", "open_questions", "topics", "unverified"],
       "properties": {
         "one_liner": { "type": "string", "description": "一句话概括会议结论，不超过 40 字" },
         "decisions": {
@@ -425,6 +452,19 @@ object Prompts {
             "additionalProperties": false,
             "required": ["title"],
             "properties": { "title": { "type": "string" } }
+          }
+        },
+        "unverified": {
+          "type": "array",
+          "description": "转写可能不准、需要人耳核对的条目（数字/人名/日期/金额/负责人/术语），没有则为空数组",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "reason"],
+            "properties": {
+              "text": { "type": "string", "description": "原文里的可疑片段，尽量照抄" },
+              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" }
+            }
           }
         }
       }

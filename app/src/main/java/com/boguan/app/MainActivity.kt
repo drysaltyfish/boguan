@@ -320,7 +320,7 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
 }
 
 /**
- * 待确认清单（ADR-0004 的一部分）：实时稿与终稿二遍分歧最大的段落，
+ * 待确认清单（ADR-0004 的一部分）：实时稿与终稿（校正稿）分歧最大的段落，
  * 两份文本并排给出，点「回听」直接听原音频核对。
  */
 @Composable
@@ -334,7 +334,7 @@ private fun ReviewCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("待确认（" + total + " 段）", style = MaterialTheme.typography.labelLarge)
             Text(
-                "实时稿与终稿二遍不一致，建议回听核对" +
+                "实时稿与终稿不一致，建议回听核对" +
                     if (total > segments.size) "（此处先列 " + segments.size + " 段）" else "",
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -345,8 +345,8 @@ private fun ReviewCard(
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Text("实时：" + seg.text, style = MaterialTheme.typography.bodySmall)
-                    if (seg.offlineText.isNotBlank()) {
-                        Text("二遍：" + seg.offlineText, style = MaterialTheme.typography.bodySmall)
+                    if (seg.finalGuess.isNotBlank()) {
+                        Text("终稿：" + seg.finalGuess, style = MaterialTheme.typography.bodySmall)
                     }
                     TextButton(onClick = { onPlay(seg) }) { Text("回听") }
                 }

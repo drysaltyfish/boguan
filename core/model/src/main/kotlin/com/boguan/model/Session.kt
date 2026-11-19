@@ -57,8 +57,11 @@ data class Segment(
     val offlineSimilarity: Double
         get() = if (offlineText.isBlank()) 1.0 else TranscriptMerge.similarity(text, offlineText)
 
-    /** 实时稿与二遍稿分歧较大，建议回听确认。 */
-    val needsReview: Boolean get() = TranscriptMerge.needsReview(text, offlineText)
+    /** 终稿（校正稿优先，其次离线稿）与实时稿分歧较大，建议回听确认。 */
+    val finalGuess: String get() = correctedText.ifBlank { offlineText }
+
+    /** 实时稿与终稿分歧较大，建议回听确认。 */
+    val needsReview: Boolean get() = TranscriptMerge.needsReview(text, finalGuess)
 }
 
 /** 每 2 分钟的微摘要 / 每 10 分钟的结构整理。 */

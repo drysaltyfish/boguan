@@ -8,6 +8,7 @@ import com.boguan.model.ReportEnvelope
 import com.boguan.model.ReportPayload
 import com.boguan.model.SessionType
 import com.boguan.model.Topic
+import com.boguan.model.UnverifiedItem
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -69,6 +70,7 @@ object ReportParser {
                 questions = questions,
                 topics = topics,
             ),
+            unverified = parseUnverified(root),
         )
     }
 
@@ -112,8 +114,18 @@ object ReportParser {
                 questions = questions,
                 topics = topics,
             ),
+            unverified = parseUnverified(root),
         )
     }
+
+    /** 待确认清单：LLM 报告的「可能听错」条目（ADR-0004）。 */
+    private fun parseUnverified(root: JsonObject): List<UnverifiedItem> =
+        array(root, "unverified").mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val text = str(o, "text")
+            if (text.isBlank()) return@mapNotNull null
+            UnverifiedItem(text = text, reason = str(o, "reason"))
+        }
 
     private fun emphasisKind(raw: String): Emphasis.Kind = when (raw) {
         "EXAM" -> Emphasis.Kind.EXAM
