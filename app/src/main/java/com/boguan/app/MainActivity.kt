@@ -68,7 +68,10 @@ private fun RootScreen(vm: MainViewModel = viewModel()) {
             initialModel = vm.model,
             initialGlossary = vm.glossary,
             initialCorrectionEnabled = vm.correctionEnabled,
-            onSave = { b, k, m, glossary, correction -> vm.saveSettings(b, k, m, glossary, correction) },
+            initialRealtimeChunkMs = vm.realtimeChunkMs,
+            onSave = { b, k, m, glossary, correction, chunk ->
+                vm.saveSettings(b, k, m, glossary, correction, chunk)
+            },
             onBack = { showSettings = false },
         )
         opened != null -> HistoryDetailScreen(vm, opened)

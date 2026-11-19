@@ -33,7 +33,7 @@
 ## 技术栈
 
 - **Kotlin + Jetpack Compose**，核心为纯 Kotlin 模块（无 Android 依赖）
-- 实时 ASR：`sherpa-onnx` + **X-ASR 流式 zipformer（480 ms chunk，Apache-2.0）**（端上）
+- 实时 ASR：`sherpa-onnx` + **X-ASR 流式 zipformer（默认 1920 ms chunk，可选 480 ms，Apache-2.0）**（端上）
 - 终稿 ASR：`Paraformer-zh` int8（端上离线二遍；SenseVoice 仍作备选，见 [ADR-0010](docs/adr/0010-two-pass-text-policy.md)）
 - LLM：**OpenAI 兼容协议**，供应商与模型可切换（OpenAI / 大陆可直连 / 自定义 `base_url`）
 - 最低 Android 10（API 29）
@@ -44,10 +44,12 @@
 
 | 模型变体 | RTF | 首字延迟 | 实时余量 |
 |---|---|---|---|
-| **X-ASR 480ms（默认）** | **0.085** | **1.60 s** | 11.8× |
-| X-ASR 1920ms（省电档） | 0.046 | 2.10 s | 21.6× |
+| X-ASR 480ms（可选档，低延迟） | 0.085 | 1.60 s | 11.8× |
+| **X-ASR 1920ms（默认）** | **0.046** | **2.10 s** | 21.6× |
 
-结论：端上实时转写**可行**，首字延迟满足 <2 s 门槛。详见 [ADR-0008](docs/adr/0008-realtime-model-revision.md)。
+参考文本为 LLM 校正稿时，两档的字符错误率：1920 ms **10.6%**、480 ms **15.9%**（下降 33%，见 [ADR-0012](docs/adr/0012-realtime-tier-1920ms.md)）。
+
+结论：端上实时转写**可行**；默认用更准的 1920 ms 档，需要更低首字延迟时可在设置里切回 480 ms。
 
 ## 文档
 
@@ -64,6 +66,7 @@
 | [ADR-0009](docs/adr/0009-storage-implementation.md) | 存储实现：首版 SQLiteOpenHelper，Room 作迁移目标 |
 | [ADR-0010](docs/adr/0010-two-pass-text-policy.md) | 二遍稿文本策略：两稿并存不覆盖，以分歧驱动待确认 |
 | [ADR-0011](docs/adr/0011-llm-transcript-correction.md) | 终稿 LLM 校正：用语言模型修同音错（并更新隐私表述） |
+| [ADR-0012](docs/adr/0012-realtime-tier-1920ms.md) | 实时档位：默认 1920 ms（错误率 10.6% vs 15.9%） |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 工程结构

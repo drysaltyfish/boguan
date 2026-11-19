@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,7 +36,8 @@ fun SettingsScreen(
     initialModel: String,
     initialGlossary: String,
     initialCorrectionEnabled: Boolean,
-    onSave: (baseUrl: String, apiKey: String, model: String, glossary: String, correctionEnabled: Boolean) -> Unit,
+    initialRealtimeChunkMs: Int,
+    onSave: (baseUrl: String, apiKey: String, model: String, glossary: String, correctionEnabled: Boolean, realtimeChunkMs: Int) -> Unit,
     onBack: () -> Unit,
 ) {
     var baseUrl by remember { mutableStateOf(initialBaseUrl) }
@@ -43,6 +45,7 @@ fun SettingsScreen(
     var model by remember { mutableStateOf(initialModel) }
     var glossary by remember { mutableStateOf(initialGlossary) }
     var correctionEnabled by remember { mutableStateOf(initialCorrectionEnabled) }
+    var realtimeChunkMs by remember { mutableStateOf(initialRealtimeChunkMs) }
     var savedHint by remember { mutableStateOf("") }
 
     Column(
@@ -90,6 +93,25 @@ fun SettingsScreen(
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("实时转写档位", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("更准（1920 ms 分块）", style = MaterialTheme.typography.bodyMedium)
+                    RadioButton(selected = realtimeChunkMs == 1920, onClick = { realtimeChunkMs = 1920 })
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("更低延迟（480 ms 分块）", style = MaterialTheme.typography.bodyMedium)
+                    RadioButton(selected = realtimeChunkMs == 480, onClick = { realtimeChunkMs = 480 })
+                }
+                Text(
+                    "实测同一段课堂录音：1920 ms 版错误率 10.6%，480 ms 版 15.9%（以终稿校正稿为参照）。" +
+                        "代价是首字延迟约多 0.5 秒。改动后重启应用生效。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("终稿校正", style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("用 LLM 校正识别错误", style = MaterialTheme.typography.bodyMedium)
@@ -116,7 +138,7 @@ fun SettingsScreen(
         }
 
         Button(onClick = {
-            onSave(baseUrl, apiKey, model, glossary, correctionEnabled)
+            onSave(baseUrl, apiKey, model, glossary, correctionEnabled, realtimeChunkMs)
             savedHint = "已保存，下一段摘要立即生效"
         }) { Text("保存") }
         if (savedHint.isNotEmpty()) {

@@ -153,7 +153,8 @@ object RecordingController {
         statusMessage = "模型加载中…"
         engineLoader.execute {
             val modelsRoot = File(ctx.getExternalFilesDir(null), "model")
-            val loaded = AsrEngine.create(modelsRoot)
+            val chunkMs = appSettings?.realtimeChunkMs ?: AppSettings.DEFAULT_REALTIME_CHUNK_MS
+            val loaded = AsrEngine.create(modelsRoot, chunkMs)
             main.post {
                 if (loaded == null) {
                     statusMessage = "未找到可用模型（" + modelsRoot.absolutePath + "）"

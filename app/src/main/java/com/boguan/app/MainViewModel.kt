@@ -76,6 +76,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val model: String get() = settings.model
     val glossary: String get() = settings.glossary
     val correctionEnabled: Boolean get() = settings.correctionEnabled
+    val realtimeChunkMs: Int get() = settings.realtimeChunkMs
 
     fun saveSettings(
         baseUrl: String,
@@ -83,7 +84,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         model: String,
         glossary: String = this.glossary,
         correctionEnabled: Boolean = this.correctionEnabled,
-    ) = settings.save(baseUrl, apiKey, model, glossary, correctionEnabled)
+        realtimeChunkMs: Int = this.realtimeChunkMs,
+    ) {
+        settings.save(baseUrl, apiKey, model, glossary, correctionEnabled)
+        settings.realtimeChunkMs = realtimeChunkMs
+    }
 
     // ---- 摘要状态 ----
     val summaryTitle: String get() = controller.summaryTitle

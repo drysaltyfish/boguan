@@ -31,6 +31,15 @@ class AppSettings(context: Context) {
         get() = prefs.getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS)
         set(v) = prefs.edit().putLong(KEY_INTERVAL_MS, v).apply()
 
+    /**
+     * 实时模型档位（chunk 毫秒）：1920 = 更准（默认），480 = 更低延迟。
+     * 实测（ADR-0012）：1920ms 对校正稿的 CER 0.106，480ms 为 0.159。
+     * 改动后需重启应用（引擎在启动时加载）。
+     */
+    var realtimeChunkMs: Int
+        get() = prefs.getInt(KEY_REALTIME_CHUNK_MS, DEFAULT_REALTIME_CHUNK_MS)
+        set(v) = prefs.edit().putInt(KEY_REALTIME_CHUNK_MS, v).apply()
+
     /** 本课/本会术语表（每行或逗号分隔），喂给终稿 LLM 校正（ADR-0011）。 */
     var glossary: String
         get() = prefs.getString(KEY_GLOSSARY, "") ?: ""
@@ -74,11 +83,13 @@ class AppSettings(context: Context) {
         private const val KEY_MODEL = "llm_model"
         private const val KEY_INTERVAL_MS = "summary_interval_ms"
         private const val KEY_CONSOLIDATION_INTERVAL_MS = "consolidation_interval_ms"
+        private const val KEY_REALTIME_CHUNK_MS = "realtime_chunk_ms"
         private const val KEY_GLOSSARY = "glossary_terms"
         private const val KEY_CORRECTION_ENABLED = "llm_correction_enabled"
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
         const val DEFAULT_MODEL = "gpt-4o-mini"
         const val DEFAULT_INTERVAL_MS = 120_000L
         const val DEFAULT_CONSOLIDATION_INTERVAL_MS = 600_000L
+        const val DEFAULT_REALTIME_CHUNK_MS = 1920
     }
 }
