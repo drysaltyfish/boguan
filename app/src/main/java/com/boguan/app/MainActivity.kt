@@ -8,22 +8,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,10 +34,20 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boguan.app.settings.SettingsScreen
+import com.boguan.app.ui.ReportMarkdown
 import com.boguan.model.Segment
 import com.boguan.model.Session
 import com.boguan.model.SessionState
 import com.boguan.model.SessionType
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -48,9 +56,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    RootScreen()
+            // Miuix：HyperOS 风格主题（ADR-0014）。跟随系统深色模式。
+            val themeController = remember { ThemeController(ColorSchemeMode.System) }
+            MiuixTheme(controller = themeController) {
+                Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)) {
+                    // 让内容避开状态栏 / 挖孔（Miuix 只管主题，不管窗口内边距）
+                    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                        RootScreen()
+                    }
                 }
             }
         }
@@ -112,80 +125,87 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("博观约取", style = MaterialTheme.typography.headlineSmall)
-                    TextButton(onClick = onOpenSettings) { Text("设置") }
+                    Text("博观约取", style = MiuixTheme.textStyles.title1)
+                    TextButton(text = "设置", onClick = onOpenSettings)
                 }
-                Text(vm.engineDescription, style = MaterialTheme.typography.bodySmall)
-                Text(vm.statusMessage, style = MaterialTheme.typography.bodySmall)
+                Text(vm.engineDescription, style = MiuixTheme.textStyles.footnote2)
+                Text(vm.statusMessage, style = MiuixTheme.textStyles.footnote2)
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(vm.sessionType == SessionType.LECTURE, { vm.setType(SessionType.LECTURE) }, { Text("课堂") })
-                FilterChip(vm.sessionType == SessionType.MEETING, { vm.setType(SessionType.MEETING) }, { Text("会议") })
+                TypeButton("课堂", vm.sessionType == SessionType.LECTURE) { vm.setType(SessionType.LECTURE) }
+                TypeButton("会议", vm.sessionType == SessionType.MEETING) { vm.setType(SessionType.MEETING) }
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    enabled = hasPermission && vm.canRecord && vm.state == SessionState.IDLE,
                     onClick = { vm.start() },
-                ) { Text("开始") }
-                Button(enabled = vm.state == SessionState.RECORDING, onClick = { vm.pause() }) { Text("暂停") }
+                    enabled = hasPermission && vm.canRecord && vm.state == SessionState.IDLE,
+                ) { Text("开始", style = MiuixTheme.textStyles.button) }
                 Button(
-                    enabled = vm.state == SessionState.RECORDING || vm.state == SessionState.PAUSED,
+                    onClick = { vm.pause() },
+                    enabled = vm.state == SessionState.RECORDING,
+                ) { Text("暂停", style = MiuixTheme.textStyles.button) }
+                Button(
                     onClick = { vm.stop() },
-                ) { Text("结束") }
+                    enabled = vm.state == SessionState.RECORDING || vm.state == SessionState.PAUSED,
+                ) { Text("结束", style = MiuixTheme.textStyles.button) }
                 if (!hasPermission) {
-                    Button(onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) { Text("授权麦克风") }
+                    Button(onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) {
+                        Text("授权麦克风", style = MiuixTheme.textStyles.button)
+                    }
                 }
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("实时", style = MaterialTheme.typography.labelMedium)
-                    Text(vm.partialText.ifEmpty { "—" }, style = MaterialTheme.typography.bodyLarge)
+            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("实时", style = MiuixTheme.textStyles.footnote2)
+                    Text(vm.partialText.ifEmpty { "—" }, style = MiuixTheme.textStyles.main)
                 }
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("实时摘要", style = MaterialTheme.typography.labelMedium)
+            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("实时摘要", style = MiuixTheme.textStyles.footnote2)
                     if (vm.summaryTitle.isNotBlank()) {
-                        Text(vm.summaryTitle, style = MaterialTheme.typography.titleSmall)
+                        Text(vm.summaryTitle, style = MiuixTheme.textStyles.subtitle)
                     }
                     if (vm.summaryBullets.isEmpty()) {
-                        Text("—", style = MaterialTheme.typography.bodyMedium)
+                        Text("—", style = MiuixTheme.textStyles.body1)
                     } else {
-                        vm.summaryBullets.forEach { b -> Text("· " + b, style = MaterialTheme.typography.bodyMedium) }
+                        vm.summaryBullets.forEach { b ->
+                            Text("· " + b, style = MiuixTheme.textStyles.body1)
+                        }
                     }
                     if (vm.summaryStatus.isNotBlank()) {
-                        Text(vm.summaryStatus, style = MaterialTheme.typography.bodySmall)
+                        Text(vm.summaryStatus, style = MiuixTheme.textStyles.footnote2)
                     }
                     if (vm.correctedStatus.isNotBlank()) {
-                        Text(vm.correctedStatus, style = MaterialTheme.typography.bodySmall)
+                        Text(vm.correctedStatus, style = MiuixTheme.textStyles.footnote2)
                     }
                 }
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("阶段小结（每 10 分钟）", style = MaterialTheme.typography.labelMedium)
+            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("阶段小结（每 10 分钟）", style = MiuixTheme.textStyles.footnote2)
                     if (vm.consolidatedTitle.isNotBlank()) {
-                        Text(vm.consolidatedTitle, style = MaterialTheme.typography.titleSmall)
+                        Text(vm.consolidatedTitle, style = MiuixTheme.textStyles.subtitle)
                     }
                     if (vm.consolidatedLines.isEmpty()) {
-                        Text("—", style = MaterialTheme.typography.bodyMedium)
+                        Text("—", style = MiuixTheme.textStyles.body1)
                     } else {
                         vm.consolidatedLines.forEach { line ->
-                            Text("· " + line, style = MaterialTheme.typography.bodyMedium)
+                            Text("· " + line, style = MiuixTheme.textStyles.body1)
                         }
                     }
                     if (vm.consolidatedStatus.isNotBlank()) {
-                        Text(vm.consolidatedStatus, style = MaterialTheme.typography.bodySmall)
+                        Text(vm.consolidatedStatus, style = MiuixTheme.textStyles.footnote2)
                     }
                 }
             }
@@ -195,7 +215,8 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
             Text(
                 "本场段落（" + vm.liveSegments.size + "）· 点击右侧可回听" +
                     if (flagged > 0) " · 待确认 " + flagged + " 段" else "",
-                style = MaterialTheme.typography.labelMedium,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onBackgroundVariant,
             )
         }
         items(vm.liveSegments, key = { "live-" + it.id }) { seg ->
@@ -206,14 +227,22 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
         item {
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("历史记录（" + vm.history.size + "）", style = MaterialTheme.typography.titleSmall)
-                TextButton(onClick = { vm.refreshHistory() }) { Text("刷新") }
+                Text("历史记录（" + vm.history.size + "）", style = MiuixTheme.textStyles.subtitle)
+                TextButton(text = "刷新", onClick = { vm.refreshHistory() })
             }
         }
         items(vm.history, key = { "hist-" + it.id }) { s ->
             HistoryRow(s, onClick = { vm.openSessionWithReport(s) })
         }
     }
+}
+
+@Composable
+private fun TypeButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = if (selected) ButtonDefaults.buttonColorsPrimary() else ButtonDefaults.buttonColors(),
+    ) { Text(label, style = MiuixTheme.textStyles.button) }
 }
 
 @Composable
@@ -230,28 +259,28 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
     ) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("历史场次", style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { vm.closeSession() }) { Text("返回") }
+                Text("历史场次", style = MiuixTheme.textStyles.title2)
+                TextButton(text = "返回", onClick = { vm.closeSession() })
             }
         }
         item { SessionMeta(session) }
 
         if (vm.openedConsolidations.isNotEmpty()) {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             "阶段小结（" + vm.openedConsolidations.size + "）",
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MiuixTheme.textStyles.subtitle,
                         )
                         vm.openedConsolidations.forEach { c ->
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
                                     "[" + fmtMs(c.startMs) + " – " + fmtMs(c.endMs) + "] " + c.title,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MiuixTheme.textStyles.subtitle,
                                 )
                                 c.lines.forEach { line ->
-                                    Text("· " + line, style = MaterialTheme.typography.bodySmall)
+                                    Text("· " + line, style = MiuixTheme.textStyles.footnote1)
                                 }
                             }
                         }
@@ -261,34 +290,33 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
         }
 
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("结构化报告", style = MaterialTheme.typography.labelLarge)
+                        Text("结构化报告", style = MiuixTheme.textStyles.subtitle)
                         Row {
                             TextButton(
+                                text = "重跑终稿",
+                                onClick = { vm.reprocessSession(session) },
                                 enabled = !vm.finalPassStatus.contains("处理中") &&
                                     !vm.finalPassStatus.contains("校正中"),
-                                onClick = { vm.reprocessSession(session) },
-                            ) { Text("重跑终稿") }
+                            )
                             TextButton(
-                                enabled = !vm.reportStatus.startsWith("生成中"),
+                                text = "生成报告",
                                 onClick = { vm.generateReport(session) },
-                            ) { Text("生成报告") }
+                                enabled = !vm.reportStatus.startsWith("生成中"),
+                            )
                         }
                     }
                     if (vm.finalPassStatus.isNotBlank()) {
-                        Text(vm.finalPassStatus, style = MaterialTheme.typography.bodySmall)
+                        Text(vm.finalPassStatus, style = MiuixTheme.textStyles.footnote2)
                     }
                     if (vm.reportStatus.isNotBlank()) {
-                        Text(vm.reportStatus, style = MaterialTheme.typography.bodySmall)
+                        Text(vm.reportStatus, style = MiuixTheme.textStyles.footnote2)
                     }
                     if (vm.reportText.isNotBlank()) {
-                        Text(
-                            vm.reportText,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        // 报告是 Markdown，用 mikepenz 渲染器 + Miuix 主题排版（ADR-0014）
+                        ReportMarkdown(vm.reportText)
                     }
                 }
             }
@@ -299,7 +327,6 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
                 ReviewCard(
                     segments = review.sortedBy { it.offlineSimilarity }.take(5),
                     total = review.size,
-                    audioPath = session.audioPath,
                     onPlay = { seg -> vm.togglePlayback(seg, session.audioPath) },
                 )
             }
@@ -308,7 +335,8 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
             Text(
                 "段落（" + vm.openedSegments.size + "）" +
                     if (review.isNotEmpty()) " · 待确认 " + review.size + " 段" else "",
-                style = MaterialTheme.typography.labelMedium,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onBackgroundVariant,
             )
         }
         items(vm.openedSegments, key = { "hist-seg-" + it.id }) { seg ->
@@ -327,28 +355,27 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
 private fun ReviewCard(
     segments: List<Segment>,
     total: Int,
-    audioPath: String?,
     onPlay: (Segment) -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("待确认（" + total + " 段）", style = MaterialTheme.typography.labelLarge)
+    Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("待确认（" + total + " 段）", style = MiuixTheme.textStyles.subtitle)
             Text(
                 "实时稿与终稿不一致，建议回听核对" +
                     if (total > segments.size) "（此处先列 " + segments.size + " 段）" else "",
-                style = MaterialTheme.typography.bodySmall,
+                style = MiuixTheme.textStyles.footnote2,
             )
             segments.forEach { seg ->
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         "[" + fmtMs(seg.startMs) + " – " + fmtMs(seg.endMs) + "]",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MiuixTheme.textStyles.footnote2,
                     )
-                    Text("实时：" + seg.text, style = MaterialTheme.typography.bodySmall)
+                    Text("实时：" + seg.text, style = MiuixTheme.textStyles.footnote1)
                     if (seg.finalGuess.isNotBlank()) {
-                        Text("终稿：" + seg.finalGuess, style = MaterialTheme.typography.bodySmall)
+                        Text("终稿：" + seg.finalGuess, style = MiuixTheme.textStyles.footnote1)
                     }
-                    TextButton(onClick = { onPlay(seg) }) { Text("回听") }
+                    TextButton(text = "回听", onClick = { onPlay(seg) })
                 }
             }
         }
@@ -357,54 +384,51 @@ private fun ReviewCard(
 
 @Composable
 private fun HistoryRow(session: Session, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+    Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text(
                     (if (session.type == SessionType.LECTURE) "课堂" else "会议") + " · " + fmtTime(session.startedAtMs),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MiuixTheme.textStyles.footnote2,
                 )
                 Text(
                     "时长 " + fmtDuration(session) + " · 音频 " + audioSizeLabel(session),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MiuixTheme.textStyles.footnote1,
                 )
             }
-            TextButton(onClick = onClick) { Text("查看") }
+            TextButton(text = "查看", onClick = onClick)
         }
     }
 }
 
 @Composable
 private fun SessionMeta(session: Session) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 (if (session.type == SessionType.LECTURE) "课堂" else "会议") + " · " + fmtTime(session.startedAtMs),
-                style = MaterialTheme.typography.titleSmall,
+                style = MiuixTheme.textStyles.subtitle,
             )
-            Text("时长 " + fmtDuration(session) + " · 音频 " + audioSizeLabel(session), style = MaterialTheme.typography.bodySmall)
+            Text(
+                "时长 " + fmtDuration(session) + " · 音频 " + audioSizeLabel(session),
+                style = MiuixTheme.textStyles.footnote1,
+            )
         }
     }
 }
 
 @Composable
 private fun SegmentRow(segment: Segment, playing: Boolean, onPlay: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+    Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text(
                     "[" + fmtMs(segment.startMs) + " – " + fmtMs(segment.endMs) + "]",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MiuixTheme.textStyles.footnote2,
                 )
-                Text(segment.displayText, style = MaterialTheme.typography.bodyMedium)
+                Text(segment.displayText, style = MiuixTheme.textStyles.body2)
             }
-            TextButton(onClick = onPlay) { Text(if (playing) "停止" else "回听") }
+            TextButton(text = if (playing) "停止" else "回听", onClick = onPlay)
         }
     }
 }
