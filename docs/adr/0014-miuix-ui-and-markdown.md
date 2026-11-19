@@ -1,6 +1,6 @@
 # ADR-0014：界面组件统一用 Miuix，报告用 Markdown 渲染
 
-- **状态**：已接受
+- **状态**：已接受；**版本锁定结论（Miuix 0.8.8 / markdown-renderer 0.41.0 / compileSdk 36）已被 [ADR-0015](0015-toolchain-agp9-minsdk31.md) 取代**（选型本身仍有效）
 - **日期**：2026-11-19
 - **相关**：ADR-0004（报告投影）、ADR-0011（终稿校正）
 

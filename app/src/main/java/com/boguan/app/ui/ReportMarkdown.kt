@@ -32,6 +32,8 @@ fun ReportMarkdown(markdown: String, modifier: Modifier = Modifier) {
             inlineCodeBackground = colors.surfaceContainer,
             dividerColor = colors.dividerLine,
             tableBackground = colors.surfaceContainer,
+            highlightText = colors.onBackground,
+            highlightBackground = colors.secondaryContainer,
         )
     }
     val codeStyle = remember {

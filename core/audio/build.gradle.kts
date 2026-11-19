@@ -1,14 +1,13 @@
 plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.boguan.audio"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
-        minSdk = 29
+        minSdk = 31
         consumerProguardFiles("consumer-rules.pro")
     }
 

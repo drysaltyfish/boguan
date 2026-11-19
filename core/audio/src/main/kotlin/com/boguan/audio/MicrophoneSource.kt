@@ -38,13 +38,18 @@ class MicrophoneSource(
             AudioFormat.ENCODING_PCM_16BIT,
         )
         if (minBuffer <= 0) return false
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            maxOf(minBuffer * 2, sampleRate),
-        )
+        // API 31+ 推荐用 Builder（旧构造器已废弃）
+        val record = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                    .build(),
+            )
+            .setBufferSizeInBytes(maxOf(minBuffer * 2, sampleRate))
+            .build()
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
             return false

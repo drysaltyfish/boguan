@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +29,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boguan.app.settings.SettingsScreen
 import com.boguan.app.ui.ReportMarkdown
@@ -55,10 +58,20 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android 12+：内容延伸到系统栏下方，由 Compose 自己处理 insets
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             // Miuix：HyperOS 风格主题（ADR-0014）。跟随系统深色模式。
             val themeController = remember { ThemeController(ColorSchemeMode.System) }
+            val dark = isSystemInDarkTheme()
             MiuixTheme(controller = themeController) {
+                // 状态栏/导航栏图标颜色跟随主题深浅，深色模式下不会出现黑底黑字
+                SideEffect {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
                 Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)) {
                     // 让内容避开状态栏 / 挖孔（Miuix 只管主题，不管窗口内边距）
                     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {

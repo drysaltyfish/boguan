@@ -33,11 +33,11 @@
 ## 技术栈
 
 - **Kotlin + Jetpack Compose**，核心为纯 Kotlin 模块（无 Android 依赖）
-- UI 组件统一用 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（HyperOS 风格，见 [ADR-0014](docs/adr/0014-miuix-ui-and-markdown.md)）；报告用 **multiplatform-markdown-renderer** 渲染，配色/字体取自 Miuix 主题
+- UI 组件统一用 **Miuix 0.9.4**（HyperOS 风格，见 [ADR-0014](docs/adr/0014-miuix-ui-and-markdown.md) / [ADR-0015](docs/adr/0015-toolchain-agp9-minsdk31.md)）；报告用 **multiplatform-markdown-renderer** 渲染，配色/字体取自 Miuix 主题
 - 实时 ASR：`sherpa-onnx` + **X-ASR 流式 zipformer（默认 1920 ms chunk，可选 480 ms，Apache-2.0）**（端上）
 - 终稿校正：把「实时稿 + 术语表 + 上下文」交给用户配置的 LLM 做同音字/术语校正（[ADR-0011](docs/adr/0011-llm-transcript-correction.md)）；不再内置离线 ASR 模型（[ADR-0013](docs/adr/0013-remove-offline-pass.md)）
 - LLM：**OpenAI 兼容协议**，供应商与模型可切换（OpenAI / 大陆可直连 / 自定义 `base_url`）
-- 最低 Android 10（API 29）
+- 最低 **Android 12（API 31）**；编译工具链 Gradle 9.6.0 / AGP 9.5.1 / Kotlin 2.4.21 / Compose BOM 2026.09.00（[ADR-0015](docs/adr/0015-toolchain-agp9-minsdk31.md)）
 
 ## 验证状态
 
@@ -69,7 +69,8 @@
 | [ADR-0011](docs/adr/0011-llm-transcript-correction.md) | 终稿 LLM 校正：用语言模型修同音错（并更新隐私表述） |
 | [ADR-0012](docs/adr/0012-realtime-tier-1920ms.md) | 实时档位：默认 1920 ms（错误率 10.6% vs 15.9%） |
 | [ADR-0013](docs/adr/0013-remove-offline-pass.md) | 移除离线二遍 ASR：终稿只保留 LLM 校正 |
-| [ADR-0014](docs/adr/0014-miuix-ui-and-markdown.md) | 界面统一 Miuix + 报告 Markdown 渲染（版本受 compileSdk 36 约束） |
+| [ADR-0014](docs/adr/0014-miuix-ui-and-markdown.md) | 界面统一 Miuix + 报告 Markdown 渲染 |
+| [ADR-0015](docs/adr/0015-toolchain-agp9-minsdk31.md) | 工具链升级：Gradle 9.6 / AGP 9.5 / compileSdk 37 / minSdk 31，依赖升到最新 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 工程结构
