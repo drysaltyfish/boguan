@@ -10,8 +10,8 @@ data class LlmEndpoint(
     val model: String,
 )
 
-/** 微摘要 / 结构整理 / 终稿抽取 / 会中问答 四类调用。 */
-enum class LlmPurpose { MICRO_SUMMARY, CONSOLIDATION, REPORT_EXTRACTION, QA }
+/** 微摘要 / 结构整理 / 终稿 LLM 校正 / 终稿抽取 / 会中问答 五类调用。 */
+enum class LlmPurpose { MICRO_SUMMARY, CONSOLIDATION, TRANSCRIPT_CORRECTION, REPORT_EXTRACTION, QA }
 
 data class LlmRequest(
     val purpose: LlmPurpose,

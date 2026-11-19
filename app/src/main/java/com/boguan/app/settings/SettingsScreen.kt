@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,7 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 /**
- * LLM 接入设置（ADR-0003）：OpenAI 兼容协议，模型名可填任意供应商的模型。
+ * LLM 接入设置（ADR-0003 / ADR-0011）：OpenAI 兼容协议，模型名可填任意供应商的模型。
  * 注意：key 仅保存在本机；当前用 SharedPreferences，后续须迁到 Android Keystore（ADR-0006）。
  */
 @Composable
@@ -32,12 +33,16 @@ fun SettingsScreen(
     initialBaseUrl: String,
     initialApiKey: String,
     initialModel: String,
-    onSave: (baseUrl: String, apiKey: String, model: String) -> Unit,
+    initialGlossary: String,
+    initialCorrectionEnabled: Boolean,
+    onSave: (baseUrl: String, apiKey: String, model: String, glossary: String, correctionEnabled: Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     var baseUrl by remember { mutableStateOf(initialBaseUrl) }
     var apiKey by remember { mutableStateOf(initialApiKey) }
     var model by remember { mutableStateOf(initialModel) }
+    var glossary by remember { mutableStateOf(initialGlossary) }
+    var correctionEnabled by remember { mutableStateOf(initialCorrectionEnabled) }
     var savedHint by remember { mutableStateOf("") }
 
     Column(
@@ -77,17 +82,45 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "提示：只保存到本机；摘要时只把转写文本发往该端点，音频永不外发。",
+                    "提示：只保存到本机；音频永不外发。转写文本会在生成摘要与终稿校正时发往该端点。",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Button(onClick = {
-                    onSave(baseUrl, apiKey, model)
-                    savedHint = "已保存，下一段摘要立即生效"
-                }) { Text("保存") }
-                if (savedHint.isNotEmpty()) {
-                    Text(savedHint, style = MaterialTheme.typography.bodySmall)
-                }
             }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("终稿校正", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("用 LLM 校正识别错误", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = correctionEnabled, onCheckedChange = { correctionEnabled = it })
+                }
+                Text(
+                    "把「实时稿 + 离线稿」交给 LLM，按上下文与术语表修掉同音字错误（如「女子是」→「余子式」）。" +
+                        "只发送转写文本，不发送音频；每 90 分钟约 ¥0.03。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = glossary,
+                    onValueChange = { glossary = it },
+                    label = { Text("术语表（可选）") },
+                    placeholder = { Text("行列式、余子式、代数余子式、初等变换…") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "术语表用于校正与摘要；建议把本节课的专业名词、人名、缩写填进来。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Button(onClick = {
+            onSave(baseUrl, apiKey, model, glossary, correctionEnabled)
+            savedHint = "已保存，下一段摘要立即生效"
+        }) { Text("保存") }
+        if (savedHint.isNotEmpty()) {
+            Text(savedHint, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

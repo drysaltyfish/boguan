@@ -22,11 +22,17 @@ object TranscriptMerge {
     const val REVIEW_THRESHOLD = 0.85
 
     /**
-     * 展示用文本：v0.1 用实时稿（有标点、术语命中更好）。
-     * 离线稿为空时必然回落到实时稿。
+     * 展示用文本的优先级：LLM 校正稿 > 实时稿 > 离线稿（ADR-0010 / ADR-0011）。
+     *
+     * 校正稿是唯一被验证为「显著更好」的一稿（16 段真实课堂录音上修掉
+     * 余子式/公式/变量名等同音错误），因此优先展示它；没有校正稿时
+     * 仍用实时稿，离线稿只在实时稿为空时兜底。
      */
-    fun displayText(realtime: String, offline: String): String =
-        if (realtime.isNotBlank()) realtime else offline
+    fun displayText(realtime: String, offline: String, corrected: String = ""): String = when {
+        corrected.isNotBlank() -> corrected
+        realtime.isNotBlank() -> realtime
+        else -> offline
+    }
 
     /**
      * 两稿是否分歧到需要回听确认。

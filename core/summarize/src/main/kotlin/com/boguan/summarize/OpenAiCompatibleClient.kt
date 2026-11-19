@@ -125,6 +125,7 @@ class OpenAiCompatibleClient(
     private fun schemaName(purpose: LlmPurpose): String = when (purpose) {
         LlmPurpose.MICRO_SUMMARY -> "micro_summary"
         LlmPurpose.CONSOLIDATION -> "consolidated_summary"
+        LlmPurpose.TRANSCRIPT_CORRECTION -> "transcript_correction"
         LlmPurpose.REPORT_EXTRACTION -> "report_extraction"
         LlmPurpose.QA -> "qa_answer"
     }

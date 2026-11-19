@@ -193,6 +193,74 @@ object Prompts {
     }
     """.trimIndent()
 
+    // ---------------- 终稿 LLM 校正（ADR-0011） ----------------
+
+    fun correctionSchema(): String = CORRECTION_SCHEMA
+
+    /**
+     * 校正指令。要点：只改识别错误、不改写不总结、术语跟术语表、数学变量名写清楚。
+     * 这条 prompt 是在真实课堂录音上验证过的（ADR-0011）。
+     */
+    fun correctionSystemPrompt(type: SessionType, glossary: String): String = buildString {
+        appendLine("你是中文大学" + (if (type == SessionType.LECTURE) "课堂" else "会议") + "录音的转写校正器。")
+        appendLine("用户会给出同一段音频的两份 ASR 结果（实时稿、离线稿，可能为空）。请输出**校正后的唯一文本**。")
+        appendLine("规则：")
+        appendLine("1. 只修正识别错误（同音字、术语、数字、英文变量名），不改变原意、不增删内容、不总结、不翻译；")
+        appendLine("2. 数学/专业术语按术语表写法；变量名写成 A_ij、a_i、x_n 这类清晰形式；")
+        appendLine("3. 两份稿都错但上下文能确定时按上下文修正（例如把「女子是」修正为「余子式」），不能确定就保留更通顺的一份；")
+        appendLine("4. 保持口语原貌，不要润色成书面语；")
+        appendLine("5. 只输出严格 JSON，不要解释。")
+        if (glossary.isNotBlank()) {
+            appendLine()
+            appendLine("【本课术语表】")
+            appendLine(glossary.trim())
+        }
+    }
+
+    fun correctionUserPrompt(
+        contextBefore: String,
+        items: String,
+        contextAfter: String,
+    ): String = buildString {
+        if (contextBefore.isNotBlank()) {
+            appendLine("【前文（仅用于理解，不需要校正）】")
+            appendLine(contextBefore)
+            appendLine()
+        }
+        appendLine("【待校正段落】")
+        appendLine(items)
+        if (contextAfter.isNotBlank()) {
+            appendLine()
+            appendLine("【后文（仅用于理解，不需要校正）】")
+            appendLine(contextAfter)
+        }
+        appendLine()
+        appendLine("输出 JSON：{\"segments\":[{\"i\":段落编号,\"text\":\"校正后的文本\"}]}，编号必须与输入一致。")
+    }
+
+    private val CORRECTION_SCHEMA = """
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["segments"],
+      "properties": {
+        "segments": {
+          "type": "array",
+          "description": "与输入段落一一对应",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["i", "text"],
+            "properties": {
+              "i": { "type": "integer", "description": "输入里的段落编号" },
+              "text": { "type": "string", "description": "校正后的该段文本" }
+            }
+          }
+        }
+      }
+    }
+    """.trimIndent()
+
     // ---------------- 会中问答 ----------------
 
     const val QA_SYSTEM_PROMPT: String =

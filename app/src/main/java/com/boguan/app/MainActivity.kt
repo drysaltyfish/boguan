@@ -66,7 +66,9 @@ private fun RootScreen(vm: MainViewModel = viewModel()) {
             initialBaseUrl = vm.baseUrl,
             initialApiKey = vm.apiKey,
             initialModel = vm.model,
-            onSave = { b, k, m -> vm.saveSettings(b, k, m) },
+            initialGlossary = vm.glossary,
+            initialCorrectionEnabled = vm.correctionEnabled,
+            onSave = { b, k, m, glossary, correction -> vm.saveSettings(b, k, m, glossary, correction) },
             onBack = { showSettings = false },
         )
         opened != null -> HistoryDetailScreen(vm, opened)
@@ -159,6 +161,9 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
                     if (vm.summaryStatus.isNotBlank()) {
                         Text(vm.summaryStatus, style = MaterialTheme.typography.bodySmall)
                     }
+                    if (vm.correctedStatus.isNotBlank()) {
+                        Text(vm.correctedStatus, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
@@ -210,6 +215,12 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
 
 @Composable
 private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
+    // 终稿跑完后自动刷新段落展示（校正稿优先显示）
+    LaunchedEffect(vm.finalPassStatus) {
+        if (vm.finalPassStatus.startsWith("终稿完成") || vm.finalPassStatus.startsWith("终稿失败")) {
+            vm.refreshOpenedSession()
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -251,10 +262,20 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("结构化报告", style = MaterialTheme.typography.labelLarge)
-                        TextButton(
-                            enabled = !vm.reportStatus.startsWith("生成中"),
-                            onClick = { vm.generateReport(session) },
-                        ) { Text("生成报告") }
+                        Row {
+                            TextButton(
+                                enabled = !vm.finalPassStatus.contains("处理中") &&
+                                    !vm.finalPassStatus.contains("校正中"),
+                                onClick = { vm.reprocessSession(session) },
+                            ) { Text("重跑终稿") }
+                            TextButton(
+                                enabled = !vm.reportStatus.startsWith("生成中"),
+                                onClick = { vm.generateReport(session) },
+                            ) { Text("生成报告") }
+                        }
+                    }
+                    if (vm.finalPassStatus.isNotBlank()) {
+                        Text(vm.finalPassStatus, style = MaterialTheme.typography.bodySmall)
                     }
                     if (vm.reportStatus.isNotBlank()) {
                         Text(vm.reportStatus, style = MaterialTheme.typography.bodySmall)

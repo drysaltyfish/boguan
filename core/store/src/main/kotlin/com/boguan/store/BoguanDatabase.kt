@@ -39,6 +39,7 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
                 confidence REAL NOT NULL DEFAULT 0,
                 is_final INTEGER NOT NULL DEFAULT 0,
                 offline_text TEXT NOT NULL DEFAULT '',
+                corrected_text TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE
             )
             """.trimIndent(),
@@ -112,10 +113,14 @@ class BoguanDatabase(context: Context) : SQLiteOpenHelper(
             // 二遍稿独立存储，不再覆盖实时稿（ADR-0010）
             db.execSQL("ALTER TABLE segment ADD COLUMN offline_text TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 4) {
+            // 终稿 LLM 校正稿独立存储（ADR-0011）
+            db.execSQL("ALTER TABLE segment ADD COLUMN corrected_text TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     companion object {
         const val DB_NAME = "boguan.db"
-        const val DB_VERSION = 3
+        const val DB_VERSION = 4
     }
 }

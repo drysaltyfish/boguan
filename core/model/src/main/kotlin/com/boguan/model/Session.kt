@@ -47,9 +47,11 @@ data class Segment(
     val confidence: Float = 0f,
     val isFinal: Boolean = false,
     val offlineText: String = "",
+    /** 终稿 LLM 校正后的文本（ADR-0011）；为空表示没跑或没改动。 */
+    val correctedText: String = "",
 ) {
     /** 展示用文本，由 [TranscriptMerge.displayText] 单点决定。 */
-    val displayText: String get() = TranscriptMerge.displayText(text, offlineText)
+    val displayText: String get() = TranscriptMerge.displayText(text, offlineText, correctedText)
 
     /** 实时稿与二遍稿的相似度（0..1，越低越可疑）；没有二遍稿时为 1。 */
     val offlineSimilarity: Double

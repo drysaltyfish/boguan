@@ -37,6 +37,7 @@ class SessionRepository(private val db: BoguanDatabase) {
             put("confidence", segment.confidence)
             put("is_final", if (segment.isFinal) 1 else 0)
             put("offline_text", segment.offlineText)
+            put("corrected_text", segment.correctedText)
         }
         db.writableDatabase.insert("segment", null, values)
     }
@@ -44,7 +45,7 @@ class SessionRepository(private val db: BoguanDatabase) {
     fun segmentsOf(sessionId: String): List<Segment> {
         val out = mutableListOf<Segment>()
         db.readableDatabase.rawQuery(
-            "SELECT id, session_id, start_ms, end_ms, text, confidence, is_final, offline_text " +
+            "SELECT id, session_id, start_ms, end_ms, text, confidence, is_final, offline_text, corrected_text " +
                 "FROM segment WHERE session_id = ? ORDER BY start_ms",
             arrayOf(sessionId),
         ).use { c ->
@@ -59,6 +60,7 @@ class SessionRepository(private val db: BoguanDatabase) {
                         confidence = c.getFloat(5),
                         isFinal = c.getInt(6) == 1,
                         offlineText = c.getString(7) ?: "",
+                        correctedText = c.getString(8) ?: "",
                     ),
                 )
             }
@@ -76,6 +78,18 @@ class SessionRepository(private val db: BoguanDatabase) {
             put("is_final", 1)
         }
         db.writableDatabase.update("segment", values, "id = ?", arrayOf(segmentId.toString()))
+    }
+
+    /** 终稿 LLM 校正稿（ADR-0011）；不覆盖实时稿与离线稿，便于随时重跑。 */
+    fun updateSegmentCorrectedText(segmentId: Long, correctedText: String) {
+        val values = ContentValues().apply { put("corrected_text", correctedText) }
+        db.writableDatabase.update("segment", values, "id = ?", arrayOf(segmentId.toString()))
+    }
+
+    /** 清空一场记录的所有校正稿（重跑终稿前调用）。 */
+    fun clearCorrectedText(sessionId: String) {
+        val values = ContentValues().apply { put("corrected_text", "") }
+        db.writableDatabase.update("segment", values, "session_id = ?", arrayOf(sessionId))
     }
 
     /** 转写全文（供摘要/报告用），按展示策略选文本。 */
@@ -182,6 +196,16 @@ class SessionRepository(private val db: BoguanDatabase) {
             }
         }
         return out
+    }
+
+    /** 读取一场记录的类型（终稿校正按类型选措辞）。 */
+    fun typeOf(sessionId: String): SessionType? {
+        db.readableDatabase.rawQuery(
+            "SELECT type FROM session WHERE id = ?", arrayOf(sessionId),
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return runCatching { SessionType.valueOf(c.getString(0)) }.getOrDefault(SessionType.LECTURE)
+        }
     }
 
     /** 读取一场记录的音频路径。 */

@@ -23,6 +23,8 @@ import com.boguan.store.SessionRepository
 import com.boguan.app.settings.AppSettings
 import com.boguan.summarize.ConsolidatedParser
 import com.boguan.summarize.ConsolidatedSummaryService
+import com.boguan.summarize.CorrectionParser
+import com.boguan.summarize.CorrectionService
 import com.boguan.summarize.LlmEndpoint
 import com.boguan.summarize.MicroSummaryService
 import com.boguan.summarize.OpenAiCompatibleClient
@@ -54,6 +56,10 @@ object RecordingController {
     private const val MIN_SUMMARY_CHARS = 60
     /** 结构整理至少累积这么多条微摘要才有合并价值。 */
     private const val MIN_CONSOLIDATION_MICROS = 2
+    /** LLM 校正每次送多少段（段数太多会稀释前后文，太少则调用次数多）。 */
+    private const val CORRECTION_BATCH_SIZE = 12
+    /** 校正时带多少段前后文作为理解上下文。 */
+    private const val CORRECTION_CONTEXT = 2
 
     private val main = Handler(Looper.getMainLooper())
     private val engineLoader = Executors.newSingleThreadExecutor { r -> Thread(r, "boguan-engine") }
@@ -61,6 +67,7 @@ object RecordingController {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val microSummarizer = MicroSummaryService(OpenAiCompatibleClient())
     private val consolidator = ConsolidatedSummaryService(OpenAiCompatibleClient())
+    private val correctionService = CorrectionService(OpenAiCompatibleClient())
 
     private var appContext: Context? = null
     private var repository: SessionRepository? = null
@@ -83,6 +90,7 @@ object RecordingController {
     private var previousConsolidated = ""
     private var consolidationWindowStartMs = 0L
     private var consolidationCount = 0
+    private var finalPassRunning = false
     private var totalSamplesWritten = 0L
 
     // ---- UI 可观察状态 ----
@@ -113,6 +121,11 @@ object RecordingController {
     var consolidatedLines by mutableStateOf<List<String>>(emptyList())
         private set
     var consolidatedStatus by mutableStateOf("")
+        private set
+    var finalPassStatus by mutableStateOf("")
+        private set
+    /** 录音中滚动校正的进度（“已校正至 mm:ss”）。 */
+    var correctedStatus by mutableStateOf("")
         private set
 
     val segments = mutableStateListOf<Segment>()
@@ -187,6 +200,8 @@ object RecordingController {
             consolidatedTitle = ""
             consolidatedLines = emptyList()
             consolidatedStatus = ""
+            finalPassStatus = ""
+            correctedStatus = ""
             writer = runCatching { audioStore.openWriter(newSession.id) }
                 .onFailure { Log.e(TAG, "open wav writer failed", it) }
                 .getOrNull()
@@ -247,56 +262,180 @@ object RecordingController {
         }, 0)
     }
 
-    // ---------------- 终稿二遍（ADR-0002） ----------------
+    // ---------------- 终稿：离线二遍 + LLM 校正（ADR-0010 / ADR-0011） ----------------
 
-    /** 用离线模型按实时段的起止时间重跑一遍，覆盖段文本；失败不影响已保存的实时稿。 */
+    /** 历史场次重跑终稿：重写离线稿与校正稿，不动实时稿。 */
+    fun reprocessSession(sessionId: String) {
+        if (finalPassRunning) return
+        val path = repository?.audioPathOf(sessionId)
+        if (path == null) {
+            finalPassStatus = "没有音频文件，无法重跑终稿"
+            return
+        }
+        runFinalPass(sessionId, path)
+    }
+
     private fun runFinalPass(sessionId: String, wavPath: String) {
+        if (finalPassRunning) return
+        finalPassRunning = true
         ioScope.launch {
-            val modelsRoot = appContext?.let { File(it.getExternalFilesDir(null), "model") } ?: return@launch
-            main.post { statusMessage = "终稿处理中（离线模型）…" }
-            val engine = OfflineAsrEngine.create(modelsRoot)
-            if (engine == null) {
-                main.post { statusMessage = "终稿模型未安装，保留实时稿" }
-                return@launch
-            }
             try {
-                val samples = WavPcmReader.read(File(wavPath))
-                if (samples == null) {
-                    main.post { statusMessage = "终稿失败：音频不可读" }
-                    return@launch
-                }
+                setFinalStatus("终稿处理中（离线二遍）…")
+                if (!runOfflinePass(sessionId, wavPath)) return@launch
                 val segs = repository?.segmentsOf(sessionId).orEmpty()
-                var updated = 0
-                var review = 0
-                for (s in segs) {
-                    val text = decodeSegment(engine, samples, s.startMs, s.endMs)
-                    if (text.isBlank()) continue
-                    // 只写二遍稿，不覆盖实时稿（ADR-0010）
-                    repository?.updateSegmentOfflineText(s.id, text)
-                    val flagged = com.boguan.model.TranscriptMerge.needsReview(s.text, text)
-                    if (flagged) review++
-                    updated++
-                    main.post {
-                        val idx = segments.indexOfFirst { it.id == s.id }
-                        if (idx >= 0) {
-                            segments[idx] = s.copy(offlineText = text, isFinal = true)
-                        }
-                    }
-                }
-                main.post {
-                    statusMessage = if (review > 0) {
-                        "终稿二遍完成（" + updated + "/" + segs.size + " 段，" + review + " 段待确认）"
-                    } else {
-                        "终稿二遍完成（" + updated + "/" + segs.size + " 段）"
-                    }
+                val review = segs.count { it.needsReview }
+                val offlineNote = "离线二遍完成（" + segs.size + " 段" +
+                    (if (review > 0) "，" + review + " 段待确认" else "") + "）"
+                setFinalStatus(offlineNote)
+                val type = repository?.typeOf(sessionId) ?: sessionType
+                val correction = runCorrectionPass(segs, type)
+                when {
+                    correction == null -> setFinalStatus(offlineNote)
+                    correction.first == 0 -> setFinalStatus(offlineNote + " · 校正未改动文本")
+                    else -> setFinalStatus(
+                        "终稿完成（校正 " + correction.first + "/" + segs.size + " 段）",
+                    )
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "final pass failed", t)
-                main.post { statusMessage = "终稿失败：" + (t.message ?: t.javaClass.simpleName) }
+                setFinalStatus("终稿失败：" + (t.message ?: t.javaClass.simpleName))
             } finally {
-                engine.release()
+                finalPassRunning = false
             }
         }
+    }
+
+    /** 离线模型按实时段的时间边界重跑，写入 offline_text。失败不影响已有文本。 */
+    private suspend fun runOfflinePass(sessionId: String, wavPath: String): Boolean {
+        val modelsRoot = appContext?.let { File(it.getExternalFilesDir(null), "model") } ?: return false
+        val engine = OfflineAsrEngine.create(modelsRoot) ?: run {
+            setFinalStatus("离线模型未安装，跳过离线二遍")
+            return false
+        }
+        try {
+            val samples = WavPcmReader.read(File(wavPath)) ?: run {
+                setFinalStatus("终稿失败：音频不可读")
+                return false
+            }
+            val segs = repository?.segmentsOf(sessionId).orEmpty()
+            for (s in segs) {
+                val text = decodeSegment(engine, samples, s.startMs, s.endMs)
+                if (text.isBlank()) continue
+                repository?.updateSegmentOfflineText(s.id, text)
+                main.post {
+                    val idx = segments.indexOfFirst { it.id == s.id }
+                    if (idx >= 0) segments[idx] = segments[idx].copy(offlineText = text, isFinal = true)
+                }
+            }
+            return true
+        } finally {
+            engine.release()
+        }
+    }
+
+    /**
+     * 终稿校正：全文重跑一遍。返回（改动段数, 总段数）；null 表示没跑（未配置/已关闭）。
+     */
+    private suspend fun runCorrectionPass(
+        segs: List<com.boguan.model.Segment>,
+        type: SessionType,
+    ): Pair<Int, Int>? {
+        if (segs.isEmpty()) return null
+        return runCorrection(segs, segs.indices.toList(), type)
+    }
+
+    /**
+     * 校正 [targets] 这些段落（其余段落只作为上下文）。
+     * 写 corrected_text，不覆盖实时稿与离线稿。单批失败跳过该批（ADR-0011）。
+     */
+    private suspend fun runCorrection(
+        segs: List<com.boguan.model.Segment>,
+        targets: List<Int>,
+        type: SessionType,
+        reportProgress: Boolean = true,
+    ): Pair<Int, Int>? {
+        if (targets.isEmpty()) return null
+        val endpoint = appSettings?.endpointOrNull()
+        if (endpoint == null) {
+            setFinalStatus("未配置 API key，跳过终稿校正")
+            return null
+        }
+        if (appSettings?.correctionEnabled != true) {
+            setFinalStatus("终稿校正已关闭（设置里可开启）")
+            return null
+        }
+        val glossary = appSettings?.glossary.orEmpty()
+        var changed = 0
+        var done = 0
+        for (batch in targets.chunked(CORRECTION_BATCH_SIZE)) {
+            val first = batch.first()
+            val last = batch.last()
+            if (reportProgress) {
+                setFinalStatus("终稿校正中（" + done + "/" + targets.size + " 段）…")
+            }
+            val before = segs.subList(maxOf(0, first - CORRECTION_CONTEXT), first)
+                .joinToString("\n") { it.displayText }
+            val after = segs.subList(last + 1, minOf(segs.size, last + 1 + CORRECTION_CONTEXT))
+                .joinToString("\n") { it.displayText }
+            val items = batch.joinToString("\n\n") { i ->
+                val s = segs[i]
+                buildString {
+                    append("[").append(i).append("] 实时：").append(s.text)
+                    if (s.offlineText.isNotBlank()) append("\n    离线：").append(s.offlineText)
+                }
+            }
+            val fixed = try {
+                val response = correctionService.correct(
+                    endpoint = endpoint,
+                    type = type,
+                    glossary = glossary,
+                    contextBefore = before,
+                    items = items,
+                    contextAfter = after,
+                )
+                runCatching { CorrectionParser.parse(response.content) }.getOrDefault(emptyList())
+            } catch (t: Throwable) {
+                Log.w(TAG, "correction batch failed", t)
+                emptyList()
+            }
+            for (c in fixed) {
+                if (c.index !in batch) continue
+                val s = segs[c.index]
+                repository?.updateSegmentCorrectedText(s.id, c.text)
+                if (c.text != s.text) changed++
+                main.post {
+                    val idx = segments.indexOfFirst { it.id == s.id }
+                    if (idx >= 0) segments[idx] = segments[idx].copy(correctedText = c.text)
+                }
+            }
+            done += batch.size
+        }
+        return changed to targets.size
+    }
+
+    /**
+     * 录音中滚动校正：每 2 分钟把刚结束那一窗的段落校正一次，
+     * 让实时列表里的文本在几分钟内变成可读的校正稿（ADR-0011）。
+     */
+    private fun correctWindow(startMs: Long, endMs: Long) {
+        if (state == SessionState.IDLE || state == SessionState.FINALIZING) return
+        val snapshot = segments.toList()
+        val targets = snapshot.indices.filter { i ->
+            val s = snapshot[i]
+            s.correctedText.isBlank() && s.text.isNotBlank() &&
+                s.endMs <= endMs && s.startMs >= startMs
+        }
+        if (targets.isEmpty()) return
+        val type = session?.type ?: sessionType
+        ioScope.launch {
+            runCorrection(snapshot, targets, type, reportProgress = false)
+            main.post { correctedStatus = "已校正至 " + fmtMs(endMs) }
+        }
+    }
+
+    private fun setFinalStatus(text: String) {
+        finalPassStatus = text
+        statusMessage = text
     }
 
     private fun decodeSegment(engine: OfflineAsrEngine, all: FloatArray, startMs: Long, endMs: Long): String {
@@ -382,6 +521,8 @@ object RecordingController {
                             payloadJson = response.content,
                         ),
                     )
+                    // 滚动校正：让这一窗的实时稿在几分钟内变成可读文本（ADR-0011）
+                    correctWindow(startMs, endMs)
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "summary failed", t)

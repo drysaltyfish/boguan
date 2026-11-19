@@ -74,13 +74,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val baseUrl: String get() = settings.baseUrl
     val apiKey: String get() = settings.apiKey
     val model: String get() = settings.model
+    val glossary: String get() = settings.glossary
+    val correctionEnabled: Boolean get() = settings.correctionEnabled
 
-    fun saveSettings(baseUrl: String, apiKey: String, model: String) = settings.save(baseUrl, apiKey, model)
+    fun saveSettings(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        glossary: String = this.glossary,
+        correctionEnabled: Boolean = this.correctionEnabled,
+    ) = settings.save(baseUrl, apiKey, model, glossary, correctionEnabled)
 
     // ---- 摘要状态 ----
     val summaryTitle: String get() = controller.summaryTitle
     val summaryBullets: List<String> get() = controller.summaryBullets
     val summaryStatus: String get() = controller.summaryStatus
+
+    /** 终稿（离线二遍 + LLM 校正）进度，直播页与历史页共用。 */
+    val finalPassStatus: String get() = controller.finalPassStatus
+
+    /** 录音中滚动校正的进度。 */
+    val correctedStatus: String get() = controller.correctedStatus
 
     // ---- 结构整理状态（每 10 分钟，ADR-0003） ----
     val consolidatedTitle: String get() = controller.consolidatedTitle
@@ -99,6 +113,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // 结束后刷新历史（当前场已入库）
         controller.state // 触发一次读取，确保状态最新
         refreshHistory()
+    }
+
+    /** 重跑某场历史记录的终稿（不动实时稿）。 */
+    fun reprocessSession(session: Session) {
+        controller.reprocessSession(session.id)
+    }
+
+    /** 重新读取当前打开场次的段落（终稿跑完后刷新展示）。 */
+    fun refreshOpenedSession() {
+        val session = openedSession ?: return
+        openedSegments = runCatching { historyRepository.segmentsOf(session.id) }.getOrDefault(emptyList())
+        reportText = runCatching { historyRepository.latestReport(session.id) }.getOrNull().orEmpty()
     }
 
     fun refreshHistory() {
@@ -155,7 +181,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val segments = historyRepository.segmentsOf(session.id)
-                val transcript = segments.joinToString("\n") { it.text }
+                // 报告用展示文本：有 LLM 校正稿时用校正稿（ADR-0011）
+                val transcript = segments.joinToString("\n") { it.displayText }
                 if (transcript.isBlank()) {
                     reportStatus = "本场没有转写内容"
                     return@launch
