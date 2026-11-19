@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.boguan.app.recording.RecordingController
 import com.boguan.app.recording.RecordingService
+import com.boguan.model.MicroSummary
 import com.boguan.model.Segment
 import com.boguan.model.Session
 import com.boguan.model.SessionState
@@ -16,6 +17,7 @@ import com.boguan.store.BoguanDatabase
 import com.boguan.app.settings.AppSettings
 import com.boguan.report.ReportRenderer
 import com.boguan.store.SessionRepository
+import com.boguan.summarize.ConsolidatedParser
 import com.boguan.summarize.OpenAiCompatibleClient
 import com.boguan.summarize.ReportParser
 import com.boguan.summarize.ReportService
@@ -55,6 +57,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var openedSegments by mutableStateOf<List<Segment>>(emptyList())
         private set
 
+    /** 历史场次里的阶段小结（已从库里的 JSON 解析出来，供直接渲染）。 */
+    var openedConsolidations by mutableStateOf<List<ConsolidationItem>>(emptyList())
+        private set
+
     val playingSegmentId: Long? get() = player.playingSegmentId
 
     // 注意：必须放在所有 mutableStateOf 属性之后 —— Kotlin 的 init 块按源码顺序执行，
@@ -75,6 +81,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val summaryTitle: String get() = controller.summaryTitle
     val summaryBullets: List<String> get() = controller.summaryBullets
     val summaryStatus: String get() = controller.summaryStatus
+
+    // ---- 结构整理状态（每 10 分钟，ADR-0003） ----
+    val consolidatedTitle: String get() = controller.consolidatedTitle
+    val consolidatedLines: List<String> get() = controller.consolidatedLines
+    val consolidatedStatus: String get() = controller.consolidatedStatus
 
     fun setType(type: SessionType) = controller.setType(type)
     fun preload() = controller.preload()
@@ -98,12 +109,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         player.stop()
         openedSession = session
         openedSegments = runCatching { historyRepository.segmentsOf(session.id) }.getOrDefault(emptyList())
+        openedConsolidations = runCatching {
+            historyRepository.microSummariesOf(session.id)
+                .filter { it.kind == MicroSummary.Kind.CONSOLIDATED }
+                .mapNotNull { summary ->
+                    val payload = runCatching { ConsolidatedParser.parse(summary.payloadJson, session.type) }
+                        .getOrNull() ?: return@mapNotNull null
+                    ConsolidationItem(
+                        title = payload.title,
+                        lines = payload.displayLines(),
+                        startMs = summary.startMs,
+                        endMs = summary.endMs,
+                    )
+                }
+        }.getOrDefault(emptyList())
     }
 
     fun closeSession() {
         player.stop()
         openedSession = null
         openedSegments = emptyList()
+        openedConsolidations = emptyList()
     }
 
     // ---- 报告 ----
@@ -153,6 +179,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val path = audioPath ?: controller.currentAudioPath ?: return
         player.toggle(File(path), segment.id, segment.startMs, segment.endMs)
     }
+
+    /** 历史详情里的阶段小结视图。 */
+    data class ConsolidationItem(
+        val title: String,
+        val lines: List<String>,
+        val startMs: Long,
+        val endMs: Long,
+    )
 
     override fun onCleared() {
         super.onCleared()

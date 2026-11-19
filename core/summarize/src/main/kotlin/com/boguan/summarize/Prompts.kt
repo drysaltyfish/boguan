@@ -107,6 +107,92 @@ object Prompts {
     }
     """.trimIndent()
 
+    // ---------------- 结构整理（每 10 分钟，ADR-0003） ----------------
+
+    fun consolidatedSchema(type: SessionType): String = when (type) {
+        SessionType.LECTURE -> LECTURE_CONSOLIDATED_SCHEMA
+        SessionType.MEETING -> MEETING_CONSOLIDATED_SCHEMA
+    }
+
+    fun consolidatedSystemPrompt(type: SessionType): String = when (type) {
+        SessionType.LECTURE ->
+            "你是课堂阶段整理器。把若干条相邻的 2 分钟微摘要**合并去重**成一份阶段小结，只依据给定摘要，禁止编造。" +
+                "重复的要点合并为一条；保留老师强调的考点/易错；摘要里没有的信息不要补。"
+        SessionType.MEETING ->
+            "你是会议阶段整理器。把若干条相邻的 2 分钟微摘要**合并去重**成一份阶段小结，只依据给定摘要，禁止编造。" +
+                "同一个决定被多次提到时只保留一条并取最新状态；负责人与截止日期不确定时给 null。"
+    }
+
+    /** [previous] 是上一阶段的小结（给模型维持脉络），[microSummaries] 是本阶段的微摘要列表。 */
+    fun consolidatedUserPrompt(previous: String, microSummaries: String): String = buildString {
+        appendLine("【上一阶段小结】")
+        appendLine(previous.ifBlank { "（无）" })
+        appendLine()
+        appendLine("【本阶段微摘要（按时间顺序）】")
+        appendLine(microSummaries)
+    }
+
+    private val LECTURE_CONSOLIDATED_SCHEMA = """
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "points", "questions"],
+      "properties": {
+        "title": { "type": "string", "description": "阶段标题，不超过 20 字" },
+        "summary": { "type": "string", "description": "2-3 句阶段小结，不超过 120 字" },
+        "points": {
+          "type": "array",
+          "description": "合并去重后的关键要点，5-10 条，每条不超过 40 字",
+          "items": { "type": "string" }
+        },
+        "questions": {
+          "type": "array",
+          "description": "尚未解决的疑问，没有则为空数组",
+          "items": { "type": "string" }
+        }
+      }
+    }
+    """.trimIndent()
+
+    private val MEETING_CONSOLIDATED_SCHEMA = """
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "decisions", "action_items"],
+      "properties": {
+        "title": { "type": "string", "description": "阶段标题，不超过 20 字" },
+        "summary": { "type": "string", "description": "2-3 句阶段小结，不超过 120 字" },
+        "decisions": {
+          "type": "array",
+          "description": "合并去重后的决定，没有则为空数组",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "status"],
+            "properties": {
+              "text": { "type": "string" },
+              "status": { "type": "string", "enum": ["AGREED", "PENDING", "DISPUTED", "SHELVED"] }
+            }
+          }
+        },
+        "action_items": {
+          "type": "array",
+          "description": "合并去重后的待办，没有则为空数组",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "owner", "deadline"],
+            "properties": {
+              "text": { "type": "string" },
+              "owner": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+            }
+          }
+        }
+      }
+    }
+    """.trimIndent()
+
     // ---------------- 会中问答 ----------------
 
     const val QA_SYSTEM_PROMPT: String =

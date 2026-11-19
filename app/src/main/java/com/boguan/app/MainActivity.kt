@@ -163,6 +163,26 @@ private fun LiveScreen(vm: MainViewModel = viewModel(), onOpenSettings: () -> Un
             }
         }
         item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("阶段小结（每 10 分钟）", style = MaterialTheme.typography.labelMedium)
+                    if (vm.consolidatedTitle.isNotBlank()) {
+                        Text(vm.consolidatedTitle, style = MaterialTheme.typography.titleSmall)
+                    }
+                    if (vm.consolidatedLines.isEmpty()) {
+                        Text("—", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        vm.consolidatedLines.forEach { line ->
+                            Text("· " + line, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    if (vm.consolidatedStatus.isNotBlank()) {
+                        Text(vm.consolidatedStatus, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        item {
             val flagged = vm.liveSegments.count { it.needsReview }
             Text(
                 "本场段落（" + vm.liveSegments.size + "）· 点击右侧可回听" +
@@ -201,6 +221,30 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
             }
         }
         item { SessionMeta(session) }
+
+        if (vm.openedConsolidations.isNotEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "阶段小结（" + vm.openedConsolidations.size + "）",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        vm.openedConsolidations.forEach { c ->
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    "[" + fmtMs(c.startMs) + " – " + fmtMs(c.endMs) + "] " + c.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                c.lines.forEach { line ->
+                                    Text("· " + line, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         item {
             Card(Modifier.fillMaxWidth()) {

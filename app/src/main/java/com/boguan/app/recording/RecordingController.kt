@@ -21,6 +21,8 @@ import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
 import com.boguan.store.SessionRepository
 import com.boguan.app.settings.AppSettings
+import com.boguan.summarize.ConsolidatedParser
+import com.boguan.summarize.ConsolidatedSummaryService
 import com.boguan.summarize.LlmEndpoint
 import com.boguan.summarize.MicroSummaryService
 import com.boguan.summarize.OpenAiCompatibleClient
@@ -50,12 +52,15 @@ object RecordingController {
 
     private const val TAG = "RecordingController"
     private const val MIN_SUMMARY_CHARS = 60
+    /** 结构整理至少累积这么多条微摘要才有合并价值。 */
+    private const val MIN_CONSOLIDATION_MICROS = 2
 
     private val main = Handler(Looper.getMainLooper())
     private val engineLoader = Executors.newSingleThreadExecutor { r -> Thread(r, "boguan-engine") }
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val microSummarizer = MicroSummaryService(OpenAiCompatibleClient())
+    private val consolidator = ConsolidatedSummaryService(OpenAiCompatibleClient())
 
     private var appContext: Context? = null
     private var repository: SessionRepository? = null
@@ -72,6 +77,12 @@ object RecordingController {
     private var pendingSummaryText = StringBuilder()
     private var previousSummary = ""
     private var summaryWindowStartMs = 0L
+    private var consolidationJob: Job? = null
+    private var pendingConsolidationText = StringBuilder()
+    private var pendingConsolidationCount = 0
+    private var previousConsolidated = ""
+    private var consolidationWindowStartMs = 0L
+    private var consolidationCount = 0
     private var totalSamplesWritten = 0L
 
     // ---- UI 可观察状态 ----
@@ -96,6 +107,12 @@ object RecordingController {
     var summaryBullets by mutableStateOf<List<String>>(emptyList())
         private set
     var summaryStatus by mutableStateOf("")
+        private set
+    var consolidatedTitle by mutableStateOf("")
+        private set
+    var consolidatedLines by mutableStateOf<List<String>>(emptyList())
+        private set
+    var consolidatedStatus by mutableStateOf("")
         private set
 
     val segments = mutableStateListOf<Segment>()
@@ -162,6 +179,14 @@ object RecordingController {
             summaryTitle = ""
             summaryBullets = emptyList()
             summaryStatus = if (appSettings?.endpointOrNull() == null) "未配置 API key：摘要不会生成" else ""
+            pendingConsolidationText = StringBuilder()
+            pendingConsolidationCount = 0
+            previousConsolidated = ""
+            consolidationWindowStartMs = 0L
+            consolidationCount = 0
+            consolidatedTitle = ""
+            consolidatedLines = emptyList()
+            consolidatedStatus = ""
             writer = runCatching { audioStore.openWriter(newSession.id) }
                 .onFailure { Log.e(TAG, "open wav writer failed", it) }
                 .getOrNull()
@@ -180,6 +205,7 @@ object RecordingController {
         session?.let { repository.updateState(it.id, SessionState.RECORDING) }
         statusMessage = "正在记录"
         startSummaryLoop()
+        startConsolidationLoop()
     }
 
     fun pause() {
@@ -195,7 +221,10 @@ object RecordingController {
         if (state != SessionState.RECORDING && state != SessionState.PAUSED) return
         summaryJob?.cancel()
         summaryJob = null
+        consolidationJob?.cancel()
+        consolidationJob = null
         flushSummary("结束")
+        flushConsolidation("结束")
         val repository = repository
         val current = session
         state = SessionState.FINALIZING
@@ -335,6 +364,15 @@ object RecordingController {
                     summaryBullets = bullets
                     summaryStatus = "摘要已更新至 " + fmtMs(endMs)
                     summaryWindowStartMs = endMs
+                    // 微摘要同时喂给 10 分钟结构整理的输入缓冲
+                    if (title.isNotBlank() || bullets.isNotEmpty()) {
+                        pendingConsolidationText
+                            .append(title.ifBlank { "（无标题）" })
+                            .append("：")
+                            .append(bullets.joinToString("；"))
+                            .append('\n')
+                        pendingConsolidationCount++
+                    }
                     repository?.insertMicroSummary(
                         com.boguan.model.MicroSummary(
                             sessionId = sessionId,
@@ -351,6 +389,77 @@ object RecordingController {
                     summaryStatus = "摘要失败：" + (t.message ?: t.javaClass.simpleName)
                     // 退回缓冲，下一轮重试
                     pendingSummaryText.insert(0, text + "\n")
+                }
+            }
+        }
+    }
+
+    // ---------------- 结构整理调度（每 10 分钟，ADR-0003） ----------------
+
+    private fun startConsolidationLoop() {
+        consolidationJob?.cancel()
+        val interval = appSettings?.consolidationIntervalMs ?: AppSettings.DEFAULT_CONSOLIDATION_INTERVAL_MS
+        consolidationJob = ioScope.launch {
+            while (isActive) {
+                delay(interval)
+                main.post { flushConsolidation("定时") }
+            }
+        }
+    }
+
+    /**
+     * 把本阶段的微摘要合并成阶段小结。输入不足两条微摘要时跳过
+     * （单条微摘要已经是可用粒度的摘要，再压一次只是浪费 token）。
+     */
+    private fun flushConsolidation(reason: String) {
+        val sessionId = session?.id ?: return
+        if (reason != "结束" && state != SessionState.RECORDING && state != SessionState.PAUSED) return
+        if (pendingConsolidationCount < MIN_CONSOLIDATION_MICROS) return
+        val micros = pendingConsolidationText.toString().trim()
+        if (micros.isBlank()) return
+        val endpoint = appSettings?.endpointOrNull() ?: return
+
+        pendingConsolidationText = StringBuilder()
+        pendingConsolidationCount = 0
+        val startMs = consolidationWindowStartMs
+        val endMs = segmentStartMs
+        val stage = consolidationCount + 1
+        consolidatedStatus = "阶段小结生成中（" + reason + "）…"
+
+        ioScope.launch {
+            try {
+                val response = consolidator.consolidate(
+                    endpoint = endpoint,
+                    type = sessionType,
+                    previous = previousConsolidated,
+                    microSummaries = micros,
+                )
+                val payload = ConsolidatedParser.parse(response.content, sessionType)
+                val lines = payload.displayLines()
+                main.post {
+                    consolidationCount = stage
+                    consolidationWindowStartMs = endMs
+                    consolidatedTitle = payload.title
+                    consolidatedLines = lines
+                    previousConsolidated = payload.title + "：" + payload.summary
+                    consolidatedStatus = "阶段小结已更新至 " + fmtMs(endMs) + "（第 " + stage + " 段）"
+                    repository?.insertMicroSummary(
+                        com.boguan.model.MicroSummary(
+                            sessionId = sessionId,
+                            kind = com.boguan.model.MicroSummary.Kind.CONSOLIDATED,
+                            startMs = startMs,
+                            endMs = endMs,
+                            payloadJson = response.content,
+                        ),
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "consolidation failed", t)
+                main.post {
+                    consolidatedStatus = "阶段小结失败：" + (t.message ?: t.javaClass.simpleName)
+                    // 退回缓冲，下一轮重试
+                    pendingConsolidationText.insert(0, micros + "\n")
+                    pendingConsolidationCount += MIN_CONSOLIDATION_MICROS
                 }
             }
         }
@@ -373,6 +482,8 @@ object RecordingController {
     fun release() {
         summaryJob?.cancel()
         summaryJob = null
+        consolidationJob?.cancel()
+        consolidationJob = null
         source?.stop()
         source = null
         writer?.close()

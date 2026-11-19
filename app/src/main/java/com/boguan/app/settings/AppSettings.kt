@@ -31,6 +31,11 @@ class AppSettings(context: Context) {
         get() = prefs.getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS)
         set(v) = prefs.edit().putLong(KEY_INTERVAL_MS, v).apply()
 
+    /** 结构整理间隔（毫秒）。默认 10 分钟，ADR-0003。 */
+    var consolidationIntervalMs: Long
+        get() = prefs.getLong(KEY_CONSOLIDATION_INTERVAL_MS, DEFAULT_CONSOLIDATION_INTERVAL_MS)
+        set(v) = prefs.edit().putLong(KEY_CONSOLIDATION_INTERVAL_MS, v).apply()
+
     /** 配置完整才返回 endpoint；否则返回 null，调度器会跳过摘要。 */
     fun endpointOrNull(): LlmEndpoint? {
         if (apiKey.isBlank()) return null
@@ -50,8 +55,10 @@ class AppSettings(context: Context) {
         private const val KEY_API_KEY = "llm_api_key"
         private const val KEY_MODEL = "llm_model"
         private const val KEY_INTERVAL_MS = "summary_interval_ms"
+        private const val KEY_CONSOLIDATION_INTERVAL_MS = "consolidation_interval_ms"
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
         const val DEFAULT_MODEL = "gpt-4o-mini"
         const val DEFAULT_INTERVAL_MS = 120_000L
+        const val DEFAULT_CONSOLIDATION_INTERVAL_MS = 600_000L
     }
 }
