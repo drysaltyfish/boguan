@@ -121,6 +121,14 @@ class SessionRepository(private val db: BoguanDatabase) {
         )
     }
 
+    /** 最近一次报告的原始 payload JSON（含 evidence，供重新锚定/回听）。 */
+    fun latestReportPayload(sessionId: String): String? {
+        db.readableDatabase.rawQuery(
+            "SELECT payload_json FROM report WHERE session_id = ? ORDER BY generated_at_ms DESC LIMIT 1",
+            arrayOf(sessionId),
+        ).use { c -> return if (c.moveToFirst()) c.getString(0) else null }
+    }
+
     fun latestReport(sessionId: String): String? {
         db.readableDatabase.rawQuery(
             "SELECT rendered_md FROM report WHERE session_id = ? ORDER BY generated_at_ms DESC LIMIT 1",

@@ -1,0 +1,6 @@
+{
+ "x-asr-480ms": 0.1588,
+ "x-asr-1920ms": 0.1056,
+ "paraformer-offline": 0.325,
+ "realtime-live(480, as recorded)": 0.0138
+}

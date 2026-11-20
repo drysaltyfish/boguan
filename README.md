@@ -72,6 +72,7 @@
 | [ADR-0014](docs/adr/0014-miuix-ui-and-markdown.md) | 界面统一 Miuix + 报告 Markdown 渲染 |
 | [ADR-0015](docs/adr/0015-toolchain-agp9-minsdk31.md) | 工具链升级：Gradle 9.6 / AGP 9.5 / compileSdk 37 / minSdk 31，依赖升到最新 |
 | [ADR-0016](docs/adr/0016-acceptance-without-human-transcript.md) | 无人工转写下的验收口径：自动化指标替代 CER |
+| [ADR-0017](docs/adr/0017-report-evidence-and-time-anchors.md) | 报告要点带证据片段与时间锚点：可一键回听，验收改测可回听率 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表（先读这个） |
 
 ## 工程结构
@@ -97,7 +98,7 @@ v0.1 采用**自动化验收**（不做人工转写，口径见 [ADR-0016](docs/
 python tools/acceptance_report.py --db device.db --terms terms.txt --llm-review 20
 ```
 
-输出稳定性、字符速率、校正改动率、术语命中、报告要点可定位率等指标（Markdown）。
+输出稳定性、字符速率、校正改动率、术语命中、**报告可回听率**（条目带 evidence 且能反查到原文时间段，阈值为 ADR-0007 的 ≥95%，口径见 [ADR-0017](docs/adr/0017-report-evidence-and-time-anchors.md)）等指标（Markdown）。
 
 ## 数据流向
 

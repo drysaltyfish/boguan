@@ -43,5 +43,5 @@ ADR-0010 已经证明：离线 Paraformer 的二遍稿并不比实时稿好（�
 
 ## 参考
 
-- CER 对比数据：`.spike/cer_cmp.py`（ADR-0012）
+- CER 对比数据：`docs/acceptance/spike-evidence/cer_cmp.py`（ADR-0012）
 - 设备实测：删除模型后 `du -sh` 从 542 MB 降到 325 MB；重跑终稿 18 段 ≈ 6 秒完成，状态 `终稿完成（校正 17/18 段，1 段待确认）`

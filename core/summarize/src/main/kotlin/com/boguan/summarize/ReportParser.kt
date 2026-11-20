@@ -43,23 +43,36 @@ object ReportParser {
                     "UNSURE" -> KeyPoint.ReviewStatus.UNSURE
                     else -> KeyPoint.ReviewStatus.CLEAR
                 },
+                evidence = str(o, "evidence"),
             )
         }
         val assignments = array(root, "assignments").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            ActionItem(text = str(o, "text"), deadline = optStr(o, "deadline"))
+            ActionItem(
+                text = str(o, "text"),
+                deadline = optStr(o, "deadline"),
+                evidence = str(o, "evidence"),
+            )
         }
         val emphasis = array(root, "emphasis").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Emphasis(text = str(o, "text"), kind = emphasisKind(str(o, "kind")))
+            Emphasis(
+                text = str(o, "text"),
+                kind = emphasisKind(str(o, "kind")),
+                evidence = str(o, "evidence"),
+            )
         }
         val questions = array(root, "questions").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Question(text = str(o, "text"), answer = optStr(o, "answer"))
+            Question(
+                text = str(o, "text"),
+                answer = optStr(o, "answer"),
+                evidence = str(o, "evidence"),
+            )
         }
         val topics = array(root, "topics").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Topic(title = str(o, "title"), startMs = 0, endMs = 0)
+            Topic(title = str(o, "title"), evidence = str(o, "evidence"))
         }
         return ReportPayload(
             envelope = ReportEnvelope(
@@ -84,11 +97,19 @@ object ReportParser {
                 "SHELVED" -> "搁置"
                 else -> str(o, "status")
             }
-            Emphasis(text = str(o, "text") + "（" + status + "）", kind = Emphasis.Kind.DECISION)
+            Emphasis(
+                text = str(o, "text") + "（" + status + "）",
+                kind = Emphasis.Kind.DECISION,
+                evidence = str(o, "evidence"),
+            )
         }
         val risks = array(root, "risks").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Emphasis(text = str(o, "text"), kind = Emphasis.Kind.RISK)
+            Emphasis(
+                text = str(o, "text"),
+                kind = Emphasis.Kind.RISK,
+                evidence = str(o, "evidence"),
+            )
         }
         val actions = array(root, "action_items").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
@@ -96,15 +117,16 @@ object ReportParser {
                 text = str(o, "text"),
                 owner = optStr(o, "owner"),
                 deadline = optStr(o, "deadline"),
+                evidence = str(o, "evidence"),
             )
         }
         val questions = array(root, "open_questions").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Question(text = str(o, "text"))
+            Question(text = str(o, "text"), evidence = str(o, "evidence"))
         }
         val topics = array(root, "topics").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
-            Topic(title = str(o, "title"), startMs = 0, endMs = 0)
+            Topic(title = str(o, "title"), evidence = str(o, "evidence"))
         }
         return ReportPayload(
             envelope = ReportEnvelope(
@@ -124,7 +146,11 @@ object ReportParser {
             val o = e as? JsonObject ?: return@mapNotNull null
             val text = str(o, "text")
             if (text.isBlank()) return@mapNotNull null
-            UnverifiedItem(text = text, reason = str(o, "reason"))
+            UnverifiedItem(
+                text = text,
+                reason = str(o, "reason"),
+                evidence = str(o, "evidence"),
+            )
         }
 
     private fun emphasisKind(raw: String): Emphasis.Kind = when (raw) {

@@ -7,7 +7,7 @@
   2. 实时可用性：字符速率（字/分钟）、段落长度分布
   3. 校正有效性：实时稿 → 校正稿 的字级改动率、待确认段数
   4. 术语命中：术语表里的词在 实时稿 / 校正稿 中出现的次数（校正带来的召回变化）
-  5. 报告可信度：报告要点能否在转写文本中定位、待确认条目是否有锚点
+  5. 报告可信度：可回听率（带时间锚点的条目占比，ADR-0017）、要点文本可在转写中定位的比例
   6. （可选）LLM 抽检：抽取 N 段让 LLM 从「可读性/术语正确性」打分，1-5
 
 用法：
@@ -70,11 +70,12 @@ def fmt_sec(ms: float) -> str:
 # ---------------- 数据读取 ----------------
 
 class SessionData:
-    def __init__(self, row, segments, micros, reports):
+    def __init__(self, row, segments, micros, reports, payload):
         self.id, self.type, self.started, self.ended, self.state, self.audio_path = row
         self.segments = segments
         self.micros = micros
         self.reports = reports
+        self.payload = payload  # 最新报告的类型化 JSON（ADR-0004/0017），无报告时为 None
 
     @property
     def duration_ms(self):
@@ -131,8 +132,18 @@ def load(db_path: str, session_id: str | None) -> SessionData:
         ]
     except sqlite3.OperationalError:
         reports = []
+    payload = None
+    try:
+        r = cur.execute(
+            "select payload_json from report where session_id=? order by generated_at_ms desc limit 1",
+            (sid,),
+        ).fetchone()
+        if r and r[0]:
+            payload = json.loads(r[0])
+    except (sqlite3.OperationalError, ValueError):
+        payload = None
     db.close()
-    return SessionData(row, segments, micros, reports)
+    return SessionData(row, segments, micros, reports, payload)
 
 # ---------------- 各项指标 ----------------
 
@@ -196,6 +207,76 @@ def term_stats(sess: SessionData, terms: list[str]) -> list[dict]:
         })
     return out
 
+# 报告里「可回听」的条目：与 core/report/ReportAnchorer.kt 同口径。
+# 每条给 (小节名, 兜底文本 key, 是否允许探针)，探针 = 从 evidence 里抽数字/英文片段再查。
+REPORT_ITEM_KEYS = {
+    "LECTURE": [
+        ("分主题", "topics", "title", False),
+        ("核心知识点", "key_points", "title", False),
+        ("作业与待办", "assignments", "text", False),
+        ("老师强调", "emphasis", "text", False),
+        ("问题与问答", "questions", "text", False),
+        ("待确认", "unverified", "text", True),
+    ],
+    "MEETING": [
+        ("分主题", "topics", "title", False),
+        ("已决策", "decisions", "text", False),
+        ("风险", "risks", "text", False),
+        ("行动项", "action_items", "text", False),
+        ("待解决疑问", "open_questions", "text", False),
+        ("待确认", "unverified", "text", True),
+    ],
+}
+
+def probe_keys(needle: str) -> list[str]:
+    """ReportAnchorer.probeKeys 的 Python 版：连续数字/字母（长度 ≥2）。"""
+    out, cur = [], []
+    for ch in needle:
+        if ch.isdigit() or ("a" <= ch <= "z"):
+            cur.append(ch)
+        else:
+            if len(cur) >= 2:
+                out.append("".join(cur))
+            cur = []
+    if len(cur) >= 2:
+        out.append("".join(cur))
+    return sorted(set(out), key=len, reverse=True)
+
+def anchor_coverage(sess: SessionData) -> dict | None:
+    """按 evidence 反查段落，统计报告条目中真正能回听的比例（ADR-0017）。"""
+    payload = sess.payload
+    if not payload:
+        return None
+    section_keys = REPORT_ITEM_KEYS.get(sess.type, REPORT_ITEM_KEYS["LECTURE"])
+    segs = [normalize(s["corrected"] or s["text"]) for s in sess.segments]
+    segs = [s for s in segs if s]
+    total = anchored = with_evidence = 0
+    missing: list[str] = []
+    for label, key, fallback_key, allow_probe in section_keys:
+        for item in payload.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            total += 1
+            evidence = (item.get("evidence") or "").strip()
+            fallback = (item.get(fallback_key) or "").strip()
+            if evidence:
+                with_evidence += 1
+            needle = normalize(evidence or fallback)
+            hit = bool(needle) and any(needle in s for s in segs)
+            if not hit and allow_probe and needle:
+                hit = any(k in s for k in probe_keys(needle) for s in segs if k)
+            if hit:
+                anchored += 1
+            else:
+                missing.append(f"{label}：{fallback or evidence}")
+    return {
+        "total": total,
+        "with_evidence": with_evidence,
+        "anchored": anchored,
+        "anchored_ratio": (anchored / total) if total else 0,
+        "missing": missing,
+    }
+
 def report_stats(sess: SessionData) -> dict:
     if not sess.reports:
         return {"present": False}
@@ -208,15 +289,14 @@ def report_stats(sess: SessionData) -> dict:
         key = normalize(b.split("—")[0])[:12]
         if key and key in norm_transcript:
             locatable += 1
-    unverified = [line for line in md.splitlines() if line.startswith("- ") and ("[0" in line or "[" in line)]
-    anchored = sum(1 for line in unverified if "[" in line and "]" in line)
+    anchors = anchor_coverage(sess)
     return {
         "present": True,
         "bullets": len(bullets),
         "locatable": locatable,
         "locatable_ratio": (locatable / len(bullets)) if bullets else 0,
-        "anchored_items": anchored,
         "md_chars": len(md),
+        "anchor": anchors,
     }
 
 # ---------------- 可选 LLM 抽检 ----------------
@@ -266,45 +346,61 @@ def render(sess: SessionData, cov: dict, cor: dict, terms: list[dict], rep: dict
     lines = []
     lines.append(f"# 验收报告 · {sess.type} · {sess.id}")
     lines.append("")
-    lines.append("> 自动生成（无人工转写），指标口径见 ADR-0016。时间均为时长比值/毫秒换算。")
+    lines.append("> 自动生成（无人工转写），指标口径见 ADR-0016 / ADR-0017。时间均为时长比值/毫秒换算。")
     lines.append("")
-    lines.append("## 1. 稳定性与覆盖")
-    lines.append("")
+
+    section = [0]
+
+    def head(title: str) -> None:
+        section[0] += 1
+        lines.append(f"## {section[0]}. {title}")
+        lines.append("")
+    head("稳定性与覆盖")
     lines.append(f"- 时长：**{fmt_sec(cov['duration_ms'])}**（{cov['minutes']:.1f} 分钟），音频 {cov['audio_mb']:.1f} MB")
     lines.append(f"- 段落：{cov['segments']} 段，非空 {cov['nonempty']}，空段率 {cov['empty_ratio']*100:.1f}%")
     lines.append(f"- 端点间隔：p50 {cov['gap_p50']/1000:.1f}s / p90 {cov['gap_p90']/1000:.1f}s / max {cov['gap_max']/1000:.1f}s，>30s 静默 {cov['long_silence']} 次")
     lines.append(f"- 段落时长：p50 {cov['seg_len_p50']/1000:.1f}s / p90 {cov['seg_len_p90']/1000:.1f}s")
     lines.append("")
-    lines.append("## 2. 实时可用性")
-    lines.append("")
+    head("实时可用性")
     lines.append(f"- 有效字符数：{cov['chars']}，速率 **{cov['chars_per_min']:.0f} 字/分钟**（中文讲课正常约 150–250）")
     lines.append("")
-    lines.append("## 3. 校正有效性")
-    lines.append("")
+    head("校正有效性")
     lines.append(f"- 有校正稿的段落：{cor['corrected_segments']}/{cov['segments']}")
     lines.append(f"- 校正改动率：**{cor['change_ratio']*100:.1f}%**，实时↔校正平均相似度 {cor['similarity_mean']:.3f}")
     lines.append(f"- 待确认（差异较大）：{cor['review_segments']} 段")
     lines.append("")
     if terms:
-        lines.append("## 4. 术语命中")
-        lines.append("")
+        head("术语命中")
         lines.append("| 术语 | 实时稿 | 校正稿 |")
         lines.append("|---|---|---|")
         for t in terms:
             lines.append(f"| {t['term']} | {t['realtime']} | {t['corrected']} |")
         lines.append("")
-    lines.append("## 5. 报告可信度")
-    lines.append("")
+    head("报告可信度")
     if rep.get("present"):
-        lines.append(f"- 报告要点：{rep['bullets']} 条，可在转写中定位 **{rep['locatable']}/{rep['bullets']}**（{rep['locatable_ratio']*100:.0f}%）")
-        lines.append(f"- 待确认条目带锚点：{rep['anchored_items']} 条")
+        anchors = rep.get("anchor")
+        if anchors:
+            lines.append(
+                f"- 可回听率（条目带 evidence 且能反查到原文时间段）：**{anchors['anchored']}/{anchors['total']}**"
+                f"（{anchors['anchored_ratio']*100:.0f}%），目标 ≥95%（ADR-0007，口径见 ADR-0017）"
+            )
+            lines.append(f"- 其中带 evidence 的条目：{anchors['with_evidence']}/{anchors['total']}")
+            if anchors["missing"]:
+                shown = "；".join(anchors["missing"][:5])
+                more = f" 等 {len(anchors['missing'])} 条" if len(anchors["missing"]) > 5 else ""
+                lines.append(f"- 无锚点条目：{shown}{more}")
+        else:
+            lines.append("- 本场报告是旧版（无 payload_json），无法统计可回听率；重新生成报告即可")
+        lines.append(
+            f"- 旧口径（要点文本前 12 字近似定位，仅作对照）：{rep['locatable']}/{rep['bullets']}"
+            f"（{rep['locatable_ratio']*100:.0f}%）"
+        )
         lines.append(f"- 报告长度：{rep['md_chars']} 字符")
     else:
         lines.append("- 本场还没有生成报告（课后点「生成报告」再跑一次本脚本）")
     lines.append("")
     if review:
-        lines.append("## 6. LLM 抽检（可读性 1–5）")
-        lines.append("")
+        head("LLM 抽检（可读性 1–5）")
         lines.append(f"- 抽样 {review['sampled']} 段，平均分 **{review['score_mean']:.2f}**，最低 {review['score_min']}")
         if review["wrong_terms"]:
             lines.append(f"- 被标出的可疑片段（前 20）：{'、'.join(review['wrong_terms'])}")

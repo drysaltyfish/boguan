@@ -64,7 +64,7 @@ object ReportRenderer {
             sb.appendLine("## 老师强调")
             sb.appendLine()
             payload.envelope.emphasis.forEach { e ->
-                sb.appendLine("- [" + emphasisLabel(e.kind) + "] " + e.text + anchorSuffix(e.text, null))
+                sb.appendLine("- [" + emphasisLabel(e.kind) + "] " + e.text + anchorSuffix(e.anchor))
             }
             sb.appendLine()
         }
@@ -74,7 +74,7 @@ object ReportRenderer {
             payload.envelope.keyPoints.forEach { kp ->
                 sb.appendLine("### " + kp.title + statusBadge(kp.status))
                 sb.appendLine()
-                sb.appendLine(kp.detail)
+                sb.appendLine(kp.detail + anchorSuffix(kp.anchor))
                 sb.appendLine()
             }
         }
@@ -82,7 +82,9 @@ object ReportRenderer {
             sb.appendLine("## 作业与截止日期")
             sb.appendLine()
             payload.envelope.actionItems.forEach { a ->
-                sb.appendLine("- " + a.text + (a.deadline?.let { "（截止：" + it + "）" } ?: ""))
+                sb.appendLine(
+                    "- " + a.text + (a.deadline?.let { "（截止：" + it + "）" } ?: "") + anchorSuffix(a.anchor),
+                )
             }
             sb.appendLine()
         }
@@ -94,7 +96,7 @@ object ReportRenderer {
             sb.appendLine("## 关键决议与风险")
             sb.appendLine()
             payload.envelope.emphasis.forEach { e ->
-                sb.appendLine("- [" + emphasisLabel(e.kind) + "] " + e.text)
+                sb.appendLine("- [" + emphasisLabel(e.kind) + "] " + e.text + anchorSuffix(e.anchor))
             }
             sb.appendLine()
         }
@@ -104,7 +106,9 @@ object ReportRenderer {
             payload.envelope.actionItems.forEach { a ->
                 val owner = a.owner ?: "待确认"
                 val deadline = a.deadline ?: "待确认"
-                sb.appendLine("- " + a.text + " — 负责人：" + owner + "，截止：" + deadline)
+                sb.appendLine(
+                    "- " + a.text + " — 负责人：" + owner + "，截止：" + deadline + anchorSuffix(a.anchor),
+                )
             }
             sb.appendLine()
         }
@@ -127,7 +131,9 @@ object ReportRenderer {
             sb.appendLine("## 未决问题与问答")
             sb.appendLine()
             payload.envelope.questions.forEach { q ->
-                sb.appendLine("- " + q.text + (q.answer?.let { " → " + it } ?: "（未解答）"))
+                sb.appendLine(
+                    "- " + q.text + (q.answer?.let { " → " + it } ?: "（未解答）") + anchorSuffix(q.anchor),
+                )
             }
             sb.appendLine()
         }
@@ -140,8 +146,7 @@ object ReportRenderer {
         sb.appendLine("> 以下内容转写置信度较低，请回听核对后再采信。")
         sb.appendLine()
         payload.unverified.forEach { u ->
-            val anchor = u.anchor?.let { "（[" + fmtMs(it.startMs) + "]）" } ?: ""
-            sb.appendLine("- " + u.text + " — " + u.reason + anchor)
+            sb.appendLine("- " + u.text + " — " + u.reason + anchorSuffix(u.anchor))
         }
         sb.appendLine()
     }
@@ -171,7 +176,7 @@ object ReportRenderer {
         com.boguan.model.KeyPoint.ReviewStatus.UNSURE -> "（有疑问）"
     }
 
-    private fun anchorSuffix(text: String, anchor: Anchor?): String =
+    private fun anchorSuffix(anchor: Anchor?): String =
         anchor?.let { "（[" + fmtMs(it.startMs) + "]）" } ?: ""
 
     private fun fmtMs(ms: Long): String {

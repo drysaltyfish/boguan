@@ -288,12 +288,16 @@ object Prompts {
                 "老师讲清且无歧义用 CLEAR，提到需要复习/易错用 NEEDS_REVIEW，学生明确表示没听懂用 UNSURE。" +
                 "另外把「转写可能不准、需要人耳核对」的片段放进 unverified：" +
                 "数字、人名、书名、日期、金额、作业要求、关键术语——尤其是看起来像同音错或前后矛盾的表述；" +
-                "不确定就不要硬写进正文，宁可放进 unverified。"
+                "不确定就不要硬写进正文，宁可放进 unverified。" +
+                "每条可回听的内容（知识点/强调/作业/问题/主题/待确认）都必须给 evidence：" +
+                "从转写里逐字复制的 6–20 字片段，用于反查回听时间；找不到逐字片段就给空字符串，不要编。"
         SessionType.MEETING ->
             "你是会议纪要整理器。只依据给定的转写与微摘要生成结构化纪要，禁止编造。" +
                 "负责人与截止日期不确定时必须给 null，不要猜；决定状态只能是四个枚举值之一。" +
                 "另外把「转写可能不准、需要人耳核对」的片段放进 unverified：" +
-                "人名、数字、日期、金额、负责人、决议措辞——尤其是同音错或前后矛盾的表述。"
+                "人名、数字、日期、金额、负责人、决议措辞——尤其是同音错或前后矛盾的表述。" +
+                "每条可回听的内容（决议/待办/风险/问题/主题/待确认）都必须给 evidence：" +
+                "从转写里逐字复制的 6–20 字片段；找不到就给空字符串，不要编。"
     }
 
     /**
@@ -325,11 +329,12 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["title", "detail", "status"],
+            "required": ["title", "detail", "status", "evidence"],
             "properties": {
               "title": { "type": "string", "description": "知识点名称，不超过 15 字" },
               "detail": { "type": "string", "description": "解释，不超过 120 字" },
-              "status": { "type": "string", "enum": ["CLEAR", "NEEDS_REVIEW", "UNSURE"] }
+              "status": { "type": "string", "enum": ["CLEAR", "NEEDS_REVIEW", "UNSURE"] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -338,10 +343,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "deadline"],
+            "required": ["text", "deadline", "evidence"],
             "properties": {
               "text": { "type": "string" },
-              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -350,10 +356,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "kind"],
+            "required": ["text", "kind", "evidence"],
             "properties": {
               "text": { "type": "string" },
-              "kind": { "type": "string", "enum": ["EXAM", "KEY", "PITFALL"] }
+              "kind": { "type": "string", "enum": ["EXAM", "KEY", "PITFALL"] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -362,10 +369,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "answer"],
+            "required": ["text", "answer", "evidence"],
             "properties": {
               "text": { "type": "string" },
-              "answer": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+              "answer": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -374,8 +382,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["title"],
-            "properties": { "title": { "type": "string" } }
+            "required": ["title", "evidence"],
+            "properties": {
+              "title": { "type": "string" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
+            }
           }
         },
         "unverified": {
@@ -384,10 +395,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "reason"],
+            "required": ["text", "reason", "evidence"],
             "properties": {
               "text": { "type": "string", "description": "原文里的可疑片段，尽量照抄" },
-              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" }
+              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         }
@@ -407,10 +419,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "status"],
+            "required": ["text", "status", "evidence"],
             "properties": {
               "text": { "type": "string" },
-              "status": { "type": "string", "enum": ["AGREED", "PENDING", "DISPUTED", "SHELVED"] }
+              "status": { "type": "string", "enum": ["AGREED", "PENDING", "DISPUTED", "SHELVED"] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -419,11 +432,12 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "owner", "deadline"],
+            "required": ["text", "owner", "deadline", "evidence"],
             "properties": {
               "text": { "type": "string" },
               "owner": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
-              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] }
+              "deadline": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         },
@@ -432,8 +446,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text"],
-            "properties": { "text": { "type": "string" } }
+            "required": ["text", "evidence"],
+            "properties": {
+              "text": { "type": "string" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
+            }
           }
         },
         "open_questions": {
@@ -441,8 +458,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text"],
-            "properties": { "text": { "type": "string" } }
+            "required": ["text", "evidence"],
+            "properties": {
+              "text": { "type": "string" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
+            }
           }
         },
         "topics": {
@@ -450,8 +470,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["title"],
-            "properties": { "title": { "type": "string" } }
+            "required": ["title", "evidence"],
+            "properties": {
+              "title": { "type": "string" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
+            }
           }
         },
         "unverified": {
@@ -460,10 +483,11 @@ object Prompts {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["text", "reason"],
+            "required": ["text", "reason", "evidence"],
             "properties": {
               "text": { "type": "string", "description": "原文里的可疑片段，尽量照抄" },
-              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" }
+              "reason": { "type": "string", "description": "为什么可疑，不超过 30 字" },
+              "evidence": { "type": "string", "description": "从转写中逐字复制的 6-20 字片段；找不到给空字符串" }
             }
           }
         }

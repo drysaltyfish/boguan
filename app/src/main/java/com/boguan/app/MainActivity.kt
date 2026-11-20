@@ -38,6 +38,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boguan.app.settings.SettingsScreen
 import com.boguan.app.ui.ReportMarkdown
+import com.boguan.report.ReportAnchorRow
 import com.boguan.model.Segment
 import com.boguan.model.Session
 import com.boguan.model.SessionState
@@ -302,6 +303,17 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
             }
         }
 
+        val anchorRows = vm.openedReportRows.filter { it.anchor != null }
+        if (anchorRows.isNotEmpty()) {
+            item {
+                ReportRowsCard(
+                    rows = anchorRows.take(40),
+                    playingId = vm.playingSegmentId,
+                    onPlay = { s, e -> vm.playRange(s, e) },
+                )
+            }
+        }
+
         item {
             Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -355,6 +367,55 @@ private fun HistoryDetailScreen(vm: MainViewModel, session: Session) {
         items(vm.openedSegments, key = { "hist-seg-" + it.id }) { seg ->
             SegmentRow(seg, vm.playingSegmentId == seg.id) {
                 vm.togglePlayback(seg, session.audioPath)
+            }
+        }
+    }
+}
+
+/**
+ * 报告要点回听（ADR-0017）：报告里每条可回听内容都带时间锚点，
+ * 这里按锚点列出并支持一键回听——这才是 ADR-0007「≥95% 要点可回听」的落点。
+ */
+@Composable
+private fun ReportRowsCard(
+    rows: List<ReportAnchorRow>,
+    playingId: Long?,
+    onPlay: (Long, Long) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("报告要点回听（" + rows.size + "）", style = MiuixTheme.textStyles.subtitle)
+            Text(
+                "每条要点都锚定到原文时间，点「回听」核对",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onBackgroundVariant,
+            )
+            rows.forEach { row ->
+                val anchor = row.anchor ?: return@forEach
+                // 与 MainViewModel.playRange 一致：用 -startMs-1 作伪 id，按钮在播放时变「停止」
+                val id = -anchor.startMs - 1L
+                val playing = playingId == id
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "[" + fmtMs(anchor.startMs) + "] " + row.section,
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onBackgroundVariant,
+                        )
+                        Text(
+                            row.text,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = if (playing) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
+                        )
+                    }
+                    TextButton(
+                        text = if (playing) "停止" else "回听",
+                        onClick = { onPlay(anchor.startMs, anchor.endMs) },
+                    )
+                }
             }
         }
     }

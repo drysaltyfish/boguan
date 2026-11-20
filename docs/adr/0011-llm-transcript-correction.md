@@ -56,5 +56,5 @@
 
 ## 参考
 
-- 实验脚本与数据：`.spike/fix_eval.py`、`.spike/fix-eval.json`（真实课堂录音 16 段）
+- 实验脚本与数据：`docs/acceptance/spike-evidence/fix_eval.py`、`fix-eval.json`（真实课堂录音 16 段）
 - 设备端实测：历史场次「重跑终稿」→ `终稿完成（校正 6/6 段）`，数据库三列并存，报告附录改用校正稿

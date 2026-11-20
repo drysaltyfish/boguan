@@ -45,5 +45,5 @@
 
 ## 参考
 
-- 测量脚本：`.spike/cer_cmp.py`、`.spike/cer-compare.json`
+- 测量脚本：`docs/acceptance/spike-evidence/cer_cmp.py`、`cer-compare.json`
 - sherpa-onnx 热词限制：`Cannot find ID for token ...`（BPE 模型需 BPE 形式热词）

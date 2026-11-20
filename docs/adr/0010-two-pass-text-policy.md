@@ -52,6 +52,6 @@
 
 ## 参考
 
-- 对照脚本与数据：`.spike/eval.py`、`.spike/eval.json`（桌面 sherpa-onnx 2.0.1，17 段）
+- 对照脚本与数据：`docs/acceptance/spike-evidence/eval.py`、`eval.json`（桌面 sherpa-onnx 2.0.1，17 段）
 - sherpa-onnx 离线模型：https://k2-fsa.github.io/sherpa/onnx/
 - Paraformer 权重：https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09

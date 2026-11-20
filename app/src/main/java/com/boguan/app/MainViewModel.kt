@@ -16,8 +16,10 @@ import com.boguan.model.SessionType
 import com.boguan.store.BoguanDatabase
 import com.boguan.app.settings.AppSettings
 import com.boguan.model.TranscriptMerge
+import com.boguan.report.ReportAnchorRow
 import com.boguan.report.ReportAnchorer
 import com.boguan.report.ReportRenderer
+import com.boguan.report.anchorRows
 import com.boguan.store.SessionRepository
 import com.boguan.summarize.ConsolidatedParser
 import com.boguan.summarize.OpenAiCompatibleClient
@@ -132,6 +134,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = openedSession ?: return
         openedSegments = runCatching { historyRepository.segmentsOf(session.id) }.getOrDefault(emptyList())
         reportText = runCatching { historyRepository.latestReport(session.id) }.getOrNull().orEmpty()
+        reloadReportRows(session)
+    }
+
+    /** 报告要点回听列表（ADR-0017）：从原始 payload 重新锚定，不受渲染格式影响。 */
+    var openedReportRows by mutableStateOf<List<ReportAnchorRow>>(emptyList())
+        private set
+
+    private fun reloadReportRows(session: Session) {
+        val payloadJson = runCatching { historyRepository.latestReportPayload(session.id) }.getOrNull()
+        if (payloadJson.isNullOrBlank()) {
+            openedReportRows = emptyList()
+            return
+        }
+        openedReportRows = runCatching {
+            val payload = ReportParser.parse(payloadJson, session.type)
+            ReportAnchorer.anchor(payload, openedSegments).anchorRows()
+        }.getOrDefault(emptyList())
+    }
+
+    /** 按时间锚点回听（报告要点用，不依赖段落 id）。 */
+    fun playRange(startMs: Long, endMs: Long) {
+        val path = openedSession?.audioPath ?: controller.currentAudioPath ?: return
+        if (playingSegmentId == -startMs - 1L) {
+            player.stop()
+            return
+        }
+        player.toggle(java.io.File(path), -startMs - 1L, startMs, endMs)
     }
 
     fun refreshHistory() {
@@ -140,6 +169,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openSession(session: Session) {
         player.stop()
+        openedReportRows = emptyList()
         openedSession = session
         openedSegments = runCatching { historyRepository.segmentsOf(session.id) }.getOrDefault(emptyList())
         openedConsolidations = runCatching {
@@ -163,6 +193,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         openedSession = null
         openedSegments = emptyList()
         openedConsolidations = emptyList()
+        openedReportRows = emptyList()
     }
 
     // ---- 报告 ----
@@ -175,6 +206,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         openSession(session)
         reportText = runCatching { historyRepository.latestReport(session.id) }.getOrNull().orEmpty()
         reportStatus = if (reportText.isBlank()) "" else "已加载上次生成的报告"
+        reloadReportRows(session)
     }
 
     fun generateReport(session: Session) {
@@ -214,6 +246,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val markdown = ReportRenderer.render(session, payload, transcript)
                 historyRepository.insertReport(session.id, session.type, response.content, markdown)
                 reportText = markdown
+                reloadReportRows(session)
                 reportStatus = "报告已生成（" + response.inputTokens + "→" + response.outputTokens + " tokens）"
             } catch (t: Throwable) {
                 reportStatus = "生成失败：" + (t.message ?: t.javaClass.simpleName)
